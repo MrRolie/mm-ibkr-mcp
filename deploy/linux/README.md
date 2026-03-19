@@ -1,181 +1,200 @@
-# Linux Local Deployment
+# Linux Dual Gateway Deployment
 
-Production deployment for IBKR Gateway with Docker, using IBC for auto-login and 2FA handling.
+Production deployment for two IBKR Gateway sessions on Linux with Docker, using IBC for auto-login and 2FA handling. This Linux deployment is gateway-only: there is no extra HTTP service in the runtime path.
 
 ## Quick Start
 
 ```bash
 cd deploy/linux
 cp .env.example .env
-# Edit .env with your IBKR credentials
+# Edit .env with your live and paper IBKR credentials
 ./scripts/start.sh
+./scripts/status.sh
 ```
 
-Wait for 2FA approval on your mobile, then verify:
+Approve both 2FA prompts on your mobile device on first start.
 
-```bash
-curl http://localhost:8000/health
-```
+## Quick Reference
+
+| Service | Address | Purpose |
+|---------|---------|---------|
+| IB Gateway Live | `127.0.0.1:4001` | Live trading API socket |
+| IB Gateway Paper | `127.0.0.1:4002` | Paper trading API socket |
+| Live VNC | `127.0.0.1:5900` | Live gateway UI access |
+| Paper VNC | `127.0.0.1:5901` | Paper gateway UI access |
 
 ## Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────┐
-│                    Linux Host                                    │
+│                    Linux Host                                   │
 │                                                                 │
-│  ┌─────────────────────┐     ┌─────────────────────┐           │
-│  │  IB Gateway Docker  │     │  mm-ibkr-gateway    │           │
-│  │  (IBC + Xvfb+socat) │◄────│  FastAPI :8000      │           │
-│  │  Live: 4003→4001    │     └─────────────────────┘           │
-│  │  Paper: 4004→4002   │                                       │
-│  │  VNC: 5900          │                                       │
-│  └─────────────────────┘                                        │
-│           │                                                     │
-│           ▼                                                     │
-│  ┌─────────────────────────────────────────┐                    │
-│  │         Docker Network: ibkr-network    │                    │
-│  └─────────────────────────────────────────┘                    │
+│  ┌─────────────────────┐     ┌─────────────────────┐            │
+│  │  IB Gateway Live    │     │  IB Gateway Paper   │            │
+│  │  (IBC + Xvfb+socat) │     │  (IBC + Xvfb+socat) │            │
+│  │  API: 4003 -> 4001  │     │  API: 4004 -> 4002  │            │
+│  │  VNC: 5900 -> 5900  │     │  VNC: 5900 -> 5901  │            │
+│  └─────────────────────┘     └─────────────────────┘            │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-## Components
-
-| Component | Image | Version |
-|-----------|-------|---------|
-| IB Gateway | `ghcr.io/gnzsnz/ib-gateway:stable` | 10.37.1o |
-| IBC | Included in image | 3.23.0 |
-| FastAPI | Built from project Dockerfile | Python 3.11 |
-
 ## File Structure
 
-```
+```text
 deploy/linux/
-├── docker-compose.yml        # Combined stack (gateway + api)
-├── .env.example              # Environment template
+├── docker-compose.yml
+├── .env.example
 ├── config/
-│   ├── config.json           # API runtime config
-│   └── tws_settings/         # IB Gateway settings (persistent)
-├── data/                     # API data (audit db, logs)
+│   └── tws_settings/
+│       ├── live/
+│       └── paper/
 ├── scripts/
-│   ├── start.sh              # Start stack
-│   ├── stop.sh               # Stop stack
-│   ├── status.sh             # Health check
-│   └── logs.sh               # Tail logs
+│   ├── start.sh
+│   ├── stop.sh
+│   ├── status.sh
+│   └── logs.sh
 └── README.md
 ```
 
 ## Configuration
 
-### Environment Variables (.env)
+### Environment Variables
 
 | Variable | Description |
 |----------|-------------|
-| `TWS_USERID` | IBKR username |
-| `TWS_PASSWORD` | IBKR password |
-| `TRADING_MODE` | `live`, `paper`, or `both` |
-| `TIME_ZONE` | Timezone (e.g., `America/New_York`) |
-| `VNC_PASSWORD` | Password for VNC access |
+| `TWS_USERID_LIVE` | Live IBKR username |
+| `TWS_PASSWORD_LIVE` | Live IBKR password |
+| `TWS_USERID_PAPER` | Paper IBKR username |
+| `TWS_PASSWORD_PAPER` | Paper IBKR password |
+| `TIME_ZONE` | Host timezone, for example `America/Toronto` |
+| `VNC_PASSWORD` | Shared VNC password for both gateway UIs |
 
-### Key Settings
+### Runtime Defaults
 
-| Setting | Value | Purpose |
-|---------|-------|---------|
-| `AUTO_RESTART_TIME` | `11:45 PM` | Daily restart without re-auth |
-| `TWOFA_TIMEOUT_ACTION` | `restart` | Auto-retry 2FA on timeout |
-| `RELOGIN_AFTER_TWOFA_TIMEOUT` | `yes` | Re-initiate login if 2FA expires |
-| `EXISTING_SESSION_DETECTED_ACTION` | `primary` | Handle session conflicts |
+| Service | Auto Restart | API Port | VNC Port |
+|---------|--------------|----------|----------|
+| Live | `11:45 PM` | `4001` | `5900` |
+| Paper | `11:50 PM` | `4002` | `5901` |
 
-## Scripts
+Shared settings:
+- `TWOFA_TIMEOUT_ACTION=restart`
+- `RELOGIN_AFTER_TWOFA_TIMEOUT=yes`
+- `EXISTING_SESSION_DETECTED_ACTION=primary`
+- `TWS_ACCEPT_INCOMING=accept`
+
+## Operating Model
+
+- Run both sessions concurrently so live strategies can remain active while new strategies are tested in paper.
+- Use separate live and paper usernames. IBKR supports simultaneous live and paper sessions when they use different credentials and different ports.
+- `mm-trading` and local tools connect directly to `127.0.0.1:4001` or `127.0.0.1:4002`.
+
+## Management Commands
 
 ```bash
-./scripts/start.sh    # Start the stack
-./scripts/stop.sh     # Stop the stack
-./scripts/status.sh   # Show health status
-./scripts/logs.sh     # Tail all logs
-./scripts/logs.sh ib-gateway  # Tail specific service
+./scripts/start.sh
+./scripts/start.sh live
+./scripts/start.sh paper
+
+./scripts/stop.sh
+./scripts/stop.sh live
+./scripts/stop.sh paper
+
+./scripts/status.sh
+./scripts/status.sh live
+./scripts/status.sh paper
+
+./scripts/logs.sh
+./scripts/logs.sh live
+./scripts/logs.sh paper
 ```
 
-## 2FA Flow
+## Direct Connectivity
 
-```
-1. IBC starts Gateway → Auto-fills credentials → Clicks Login
-        ↓
-2. IBKR sends push notification to Mobile App
-        ↓
-3a. Approve within 3 min → Login succeeds
-        ↓
-   Gateway runs until 11:45 PM restart
+### Python (`ib_insync`)
 
-   ─────────── OR ───────────
+```python
+from ib_insync import IB
 
-3b. Timeout → IBC auto-restarts login
-        ↓
-   New push sent → Repeat until approved
+ib = IB()
+ib.connect("127.0.0.1", 4001, clientId=100)  # Live
+# ib.connect("127.0.0.1", 4002, clientId=200)  # Paper
+
+print(ib.managedAccounts())
+ib.disconnect()
 ```
 
-## Maintenance
+Use distinct `clientId` values for each process. If you run live and paper connections at the same time, keep their client IDs separate as well.
 
-| Event | Action | Notes |
-|-------|--------|-------|
-| Daily 11:45 PM | Auto-restart | No re-auth needed |
-| Sunday 01:00+ ET | Weekly expiry | Must approve 2FA once |
-| Container crash | Auto-restart | `restart: always` policy |
+### `mm-trading`
+
+`mm-trading` should continue using direct `ibkr_core` socket access:
+- live lane uses `127.0.0.1:4001`
+- paper lane uses `127.0.0.1:4002`
+- no Linux HTTP wrapper should be added for these paths
+
+## 2FA Handling
+
+1. Each container starts IBC and auto-fills credentials.
+2. IBKR sends a mobile 2FA prompt for the live session and another for the paper session.
+3. Approve both prompts within the IBKR timeout window.
+4. If a prompt expires, IBC restarts the login flow and sends a fresh prompt.
+
+Weekly re-authentication is still required after the Sunday reset window. Daily auto-restarts should not need fresh approval outside that weekly cycle as long as the same usernames are not used elsewhere.
 
 ## VNC Access
 
-Connect to `localhost:5900` with any VNC client (RealVNC, TigerVNC, etc.) to view the IB Gateway UI. Useful for:
-- First-time setup verification
-- Debugging login issues
-- Checking auto-restart settings
+```bash
+vncviewer 127.0.0.1:5900  # Live
+vncviewer 127.0.0.1:5901  # Paper
+```
 
-## Ports
-
-| Port | Service | Description |
-|------|---------|-------------|
-| 4001 | Live API | IBKR live trading |
-| 4002 | Paper API | IBKR paper trading |
-| 8000 | REST API | mm-ibkr-gateway FastAPI |
-| 5900 | VNC | IB Gateway UI access |
-
-All ports bound to `127.0.0.1` (localhost only).
+Both sessions use `VNC_PASSWORD` from `.env`.
 
 ## Troubleshooting
 
-### API not connecting to Gateway
+### A gateway is not starting
 
-Check the health status:
+```bash
+./scripts/logs.sh live
+./scripts/logs.sh paper
+```
+
+Common causes:
+- missing or incorrect credentials in `.env`
+- 2FA approval timed out
+- another application is using the same username
+- stale settings under `config/tws_settings/live` or `config/tws_settings/paper`
+
+### A socket port is closed
+
 ```bash
 ./scripts/status.sh
 ```
 
-Verify `config/config.json` has correct `ibkr_gateway_host`:
-```bash
-grep ibkr_gateway_host config/config.json
-# Should show: "ibkr_gateway_host": "ib-gateway"
-```
+If the container is up but the API port is closed, inspect the matching VNC session to confirm whether IB Gateway is still at the login or 2FA screen.
 
-### Gateway not starting
+### Another trading app gets logged out
 
-Check logs:
-```bash
-./scripts/logs.sh ib-gateway
-```
+IBKR will not keep multiple trading apps active on the same username. Dedicate one username to live automation and a different username to paper automation.
 
-### Permission errors on data/
+## Data Locations
 
-```bash
-chmod 777 deploy/linux/data
-```
+| Path | Purpose |
+|------|---------|
+| `deploy/linux/.env` | Live and paper gateway credentials |
+| `deploy/linux/config/tws_settings/live/` | Persistent live gateway settings |
+| `deploy/linux/config/tws_settings/paper/` | Persistent paper gateway settings |
 
 ## Security
 
-1. **Credentials**: Stored in `.env` (gitignored)
-2. **Ports**: Localhost only - not exposed to network
-3. **VNC**: Password protected
-4. **API**: Orders disabled by default in `control.json`
+1. Credentials stay in `.env`, which should remain gitignored.
+2. All ports are bound to `127.0.0.1`.
+3. VNC is password-protected on separate live and paper ports.
+4. No Linux REST API is exposed.
 
 ## References
 
+- [IBKR Campus: Third Party Connections](https://www.interactivebrokers.com/campus/ibkr-api-page/third-party-connections/)
 - [IBC User Guide](https://github.com/IbcAlpha/IBC/blob/master/userguide.md)
 - [ib-gateway-docker](https://github.com/gnzsnz/ib-gateway-docker)
 - [IB Gateway Downloads](https://www.interactivebrokers.com/en/trading/ibgateway-stable.php)

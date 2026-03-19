@@ -115,7 +115,8 @@ Features:
 - IBC auto-login with 2FA retry
 - Daily auto-restart without re-authentication
 - VNC access for debugging
-- Both IB Gateway and API in Docker
+- Two isolated IB Gateway sessions in Docker (live + paper)
+- No Linux HTTP service required for the deployment path
 
 See [deploy/linux/README.md](deploy/linux/README.md) for details.
 
