@@ -1,6 +1,6 @@
 # Linux Dual Gateway Deployment
 
-Production deployment for two IBKR Gateway sessions on Linux with Docker, using IBC for auto-login and 2FA handling. This Linux deployment is gateway-only: there is no extra HTTP service in the runtime path.
+Production deployment for two IBKR Gateway sessions on Linux with Docker, using IBC for auto-login and 2FA handling. The gateways stay local on this host. Remote LLM access should use SSH stdio into the MCP wrapper instead of exposing the raw IB sockets.
 
 ## Quick Start
 
@@ -35,6 +35,11 @@ Approve both 2FA prompts on your mobile device on first start.
 │  │  API: 4003 -> 4001  │     │  API: 4004 -> 4002  │            │
 │  │  VNC: 5900 -> 5900  │     │  VNC: 5900 -> 5901  │            │
 │  └─────────────────────┘     └─────────────────────┘            │
+│                                                                 │
+│  SSH stdio MCP access                                           │
+│  - ssh -T ibkr-mcp@host                                         │
+│  - forced command -> run_mcp_stdio.sh -> uv run ibkr-mcp        │
+│  - MCP then talks locally to 127.0.0.1:4001 / 127.0.0.1:4002    │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -132,6 +137,125 @@ Use distinct `clientId` values for each process. If you run live and paper conne
 - paper lane uses `127.0.0.1:4002`
 - no Linux HTTP wrapper should be added for these paths
 
+## Claude Code Over SSH StdIO
+
+Recommended pattern for a remote single-user LLM client:
+
+1. Keep both gateways local on this host.
+2. Create a dedicated forced-command SSH account for MCP access.
+3. Have the remote client use `ssh -T <mcp-user>@<this-host>` as the MCP command.
+
+This keeps the brokerage socket local and only exposes SSH.
+
+### Host Setup
+
+Run the installer as root after you have the remote machine's public key:
+
+```bash
+cd /path/to/mm-ibkr-gateway/deploy/linux
+sudo ./scripts/setup_mcp_ssh_user.sh \
+  --user ibkr-mcp \
+  --public-key-file /path/to/remote-machine.pub
+```
+
+What the setup script does:
+
+- creates or reuses the dedicated SSH account
+- installs a forced-command `authorized_keys` entry pointing to `scripts/run_mcp_stdio.sh`
+- locks the account to key-only SSH access
+- creates a dedicated uv-backed virtualenv in the SSH user's home directory
+- grants repo read access and runtime data read/write access via ACLs
+
+The forced-command wrapper always launches:
+
+```bash
+MCP_TRANSPORT=stdio uv run --active --no-sync --frozen --no-dev --project /path/to/mm-ibkr-gateway ibkr-mcp
+```
+
+### Remote Client Command
+
+For Claude Code or another MCP client that supports stdio commands:
+
+```json
+{
+  "mcpServers": {
+    "ibkr-gateway": {
+      "command": "ssh",
+      "args": ["-T", "ibkr-mcp@YOUR_IB_HOST"]
+    }
+  }
+}
+```
+
+If you connect over Tailscale, keep using the Tailscale network address or MagicDNS name, but disable Tailscale SSH on this host:
+
+```bash
+sudo tailscale set --ssh=false
+```
+
+Reason: this deployment relies on normal `sshd` so the `ibkr-mcp` user can be forced into `run_mcp_stdio.sh`. Tailscale SSH bypasses that path and will not attach the MCP server correctly.
+
+Recommended Mac `~/.ssh/config` entry:
+
+```sshconfig
+Host trade-node-mcp
+    HostName 100.95.151.127
+    User ibkr-mcp
+    IdentityFile ~/.ssh/id_ed25519
+    IdentitiesOnly yes
+    BatchMode yes
+    PreferredAuthentications publickey
+    PasswordAuthentication no
+    RequestTTY no
+```
+
+If the client requires an explicit remote command instead of a forced command:
+
+```json
+{
+  "mcpServers": {
+    "ibkr-gateway": {
+      "command": "ssh",
+      "args": [
+        "-T",
+        "ibkr-mcp@YOUR_IB_HOST",
+        "/path/to/mm-ibkr-gateway/deploy/linux/scripts/run_mcp_stdio.sh"
+      ]
+    }
+  }
+}
+```
+
+### Verification
+
+Local wrapper verification:
+
+```bash
+./scripts/verify_mcp_ssh.sh
+```
+
+SSH verification against the forced-command account:
+
+```bash
+./scripts/verify_mcp_ssh.sh --ssh-target ibkr-mcp@YOUR_IB_HOST
+```
+
+Include gateway-dependent checks once the Docker gateways are up:
+
+```bash
+./scripts/verify_mcp_ssh.sh --ssh-target ibkr-mcp@YOUR_IB_HOST --gateway-checks
+```
+
+`control.json` and `config.json` changes are picked up automatically by new MCP requests. If Claude already has a long-lived stdio session open, reconnect the server once after changing trading mode or SSH settings.
+
+### Optional SSHD Match Block
+
+If you prefer an sshd Match block in addition to the restricted `authorized_keys` entry, see:
+
+- `deploy/linux/ssh/sshd_config.d/ibkr-mcp.conf.example`
+
+That example disables TTY, port forwarding, agent forwarding, X11 forwarding, and user rc files while forcing the MCP wrapper command.
+
 ## 2FA Handling
 
 1. Each container starts IBC and auto-fills credentials.
@@ -190,7 +314,8 @@ IBKR will not keep multiple trading apps active on the same username. Dedicate o
 1. Credentials stay in `.env`, which should remain gitignored.
 2. All ports are bound to `127.0.0.1`.
 3. VNC is password-protected on separate live and paper ports.
-4. No Linux REST API is exposed.
+4. Remote LLM access should use SSH stdio into a forced-command account.
+5. No Linux REST API or MCP HTTP listener is required for the SSH deployment path.
 
 ## References
 

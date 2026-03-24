@@ -106,11 +106,19 @@ uv run python -m ibkr_core.cli status <order_id>
 
 ## MCP Tools
 
-Primary MCP transport for hosted clients:
+Primary MCP transport choices:
 
-- `streamable-http` on `/mcp`
-- bearer token required via `MCP_AUTH_TOKEN`
-- stdio remains available for local Claude Code / desktop workflows
+- `stdio` for local or SSH-forced-command workflows
+- `streamable-http` on `/mcp` for hosted clients
+- bearer token required via `MCP_AUTH_TOKEN` only for HTTP mode
+
+Recommended single-user remote pattern:
+
+```bash
+ssh -T ibkr-mcp@YOUR_IB_HOST
+```
+
+That SSH account should be restricted to `deploy/linux/scripts/run_mcp_stdio.sh`.
 
 Canonical tool surface:
 

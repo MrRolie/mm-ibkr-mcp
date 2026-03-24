@@ -46,6 +46,7 @@ def reset_config_fixture():
         "LOG_LEVEL",
         "LIVE_TRADING_OVERRIDE_FILE",
         "MM_IBKR_CONFIG_PATH",
+        "MM_IBKR_CONTROL_DIR",
     ]
     for key in env_keys:
         old_env[key] = os.environ.get(key)
@@ -54,9 +55,17 @@ def reset_config_fixture():
 
     temp_dir = tempfile.TemporaryDirectory()
     config_path = Path(temp_dir.name) / "config.json"
+    control_dir = Path(temp_dir.name) / "control"
     os.environ["MM_IBKR_CONFIG_PATH"] = str(config_path)
-    load_config_data(create_if_missing=True)
-    write_control(ControlState(), base_dir=get_control_path().parent)
+    os.environ["MM_IBKR_CONTROL_DIR"] = str(control_dir)
+    config_data = load_config_data(create_if_missing=True)
+    config_data["control_dir"] = str(control_dir)
+    config_data["data_storage_dir"] = str(Path(temp_dir.name) / "storage")
+    config_data["log_dir"] = str(Path(temp_dir.name) / "storage" / "logs")
+    config_data["audit_db_path"] = str(Path(temp_dir.name) / "storage" / "audit.db")
+    config_data["watchdog_log_dir"] = str(Path(temp_dir.name) / "logs")
+    write_config_data(config_data, path=config_path)
+    write_control(ControlState(), base_dir=control_dir)
 
     yield
 
@@ -304,11 +313,26 @@ class TestGlobalConfig:
     """Test global config singleton."""
 
     def test_get_config_singleton(self):
-        """Test that get_config returns the same instance."""
+        """Test that get_config returns the same instance when files are unchanged."""
         config1 = get_config()
         config2 = get_config()
 
         assert config1 is config2
+
+    def test_get_config_reloads_when_control_changes(self):
+        """Changing control.json should invalidate the cached config."""
+        config1 = get_config()
+
+        write_control(
+            ControlState(trading_mode="live", orders_enabled=False, dry_run=False),
+            base_dir=get_control_path().parent,
+        )
+
+        config2 = get_config()
+
+        assert config1 is not config2
+        assert config2.trading_mode == "live"
+        assert config2.orders_enabled is False
 
     def test_reset_config(self):
         """Test that reset_config clears the singleton."""

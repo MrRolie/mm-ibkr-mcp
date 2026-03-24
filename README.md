@@ -42,6 +42,32 @@ export MCP_PUBLIC_BASE_URL=http://127.0.0.1:8001
 uv run ibkr-mcp
 ```
 
+Remote Claude Code over SSH stdio:
+
+```bash
+cd deploy/linux
+sudo ./scripts/setup_mcp_ssh_user.sh \
+  --user ibkr-mcp \
+  --public-key-file /path/to/remote-machine.pub
+```
+
+Then point the remote MCP client at:
+
+```json
+{
+  "mcpServers": {
+    "ibkr-gateway": {
+      "command": "ssh",
+      "args": ["-T", "ibkr-mcp@YOUR_IB_HOST"]
+    }
+  }
+}
+```
+
+This keeps IB Gateway local on the host and uses SSH stdio as the only remote control plane.
+
+If you connect across Tailscale, disable Tailscale SSH on the IB host with `sudo tailscale set --ssh=false` so the connection reaches normal `sshd` and the forced-command `ibkr-mcp` account.
+
 Primary canonical tools:
 
 - `ibkr_health`
@@ -186,6 +212,7 @@ Features:
 - VNC access for debugging
 - Two isolated IB Gateway sessions in Docker (live + paper)
 - No Linux HTTP service required for the deployment path
+- Optional SSH-first MCP access for Claude Code and other stdio MCP clients
 
 See [deploy/linux/README.md](deploy/linux/README.md) for details.
 

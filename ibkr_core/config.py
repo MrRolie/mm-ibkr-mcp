@@ -16,7 +16,7 @@ from typing import Optional
 
 from dotenv import load_dotenv
 
-from ibkr_core.runtime_config import load_runtime_config
+from ibkr_core.runtime_config import get_config_path, load_runtime_config
 
 logger = logging.getLogger(__name__)
 
@@ -221,17 +221,38 @@ def load_config() -> Config:
 
 # Global config instance
 _config: Optional[Config] = None
+_config_signature: Optional[tuple[tuple[str, bool, int, int], tuple[str, bool, int, int]]] = None
+
+
+def _file_signature(path: Path) -> tuple[str, bool, int, int]:
+    """Return a lightweight signature that changes when a file changes."""
+    try:
+        stat = path.stat()
+    except FileNotFoundError:
+        return (str(path), False, -1, -1)
+    return (str(path), True, stat.st_mtime_ns, stat.st_size)
+
+
+def _current_config_signature() -> tuple[tuple[str, bool, int, int], tuple[str, bool, int, int]]:
+    """Return signatures for runtime config.json and control.json."""
+    config_path = get_config_path()
+    runtime = load_runtime_config()
+    control_path = Path(runtime.control_dir) / "control.json"
+    return (_file_signature(config_path), _file_signature(control_path))
 
 
 def get_config() -> Config:
-    """Get the global config instance, loading if necessary."""
-    global _config
-    if _config is None:
+    """Get the cached config instance, reloading when source files change."""
+    global _config, _config_signature
+    signature = _current_config_signature()
+    if _config is None or _config_signature != signature:
         _config = load_config()
+        _config_signature = _current_config_signature()
     return _config
 
 
 def reset_config() -> None:
     """Reset config (useful for testing)."""
-    global _config
+    global _config, _config_signature
     _config = None
+    _config_signature = None

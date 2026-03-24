@@ -189,8 +189,9 @@ def configure_logging(
     # Remove existing handlers
     root_logger.handlers.clear()
 
-    # Create console handler
-    console_handler = logging.StreamHandler(sys.stdout)
+    # stdio MCP must reserve stdout for protocol messages only.
+    console_stream = sys.stderr if os.getenv("MCP_TRANSPORT") == "stdio" else sys.stdout
+    console_handler = logging.StreamHandler(console_stream)
     console_handler.setLevel(level)
 
     # Configure formatter based on format type
