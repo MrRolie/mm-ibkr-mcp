@@ -96,14 +96,16 @@ class OrderRegistry:
     def __init__(self):
         self._orders: Dict[str, Dict] = {}
         self._trades: Dict[str, Trade] = {}
+        self._client_order_ids: Dict[str, str] = {}
 
-    def register(self, trade: Trade, symbol: str) -> str:
+    def register(self, trade: Trade, symbol: str, client_order_id: Optional[str] = None) -> str:
         """
         Register a trade and return our order_id.
 
         Args:
             trade: ib_insync Trade object from placeOrder
             symbol: Symbol string for reference
+            client_order_id: Client-generated idempotency key, if present
 
         Returns:
             order_id: Our stable order identifier (string)
@@ -117,6 +119,7 @@ class OrderRegistry:
             "ib_order_id": trade.order.orderId,
             "perm_id": trade.order.permId,
             "client_id": trade.order.clientId,
+            "client_order_id": client_order_id or getattr(trade.order, "orderRef", None),
             "con_id": trade.contract.conId if trade.contract else None,
             "symbol": symbol,
             "placed_at": datetime.now(timezone.utc).isoformat(),
@@ -125,6 +128,9 @@ class OrderRegistry:
             "order_type": trade.order.orderType,
         }
         self._trades[order_id] = trade
+        effective_client_order_id = client_order_id or getattr(trade.order, "orderRef", None)
+        if effective_client_order_id:
+            self._client_order_ids[effective_client_order_id] = order_id
 
         logger.debug(
             f"Registered order {order_id}: {symbol} {trade.order.action} "
@@ -156,6 +162,17 @@ class OrderRegistry:
         """
         return self._orders.get(order_id)
 
+    def lookup_order_id_by_client_order_id(self, client_order_id: str) -> Optional[str]:
+        """Find an order id by client order id."""
+        return self._client_order_ids.get(client_order_id)
+
+    def lookup_by_client_order_id(self, client_order_id: str) -> Optional[Trade]:
+        """Find a trade by client order id."""
+        order_id = self.lookup_order_id_by_client_order_id(client_order_id)
+        if order_id is None:
+            return None
+        return self.lookup(order_id)
+
     def all_orders(self) -> List[Dict]:
         """Return list of all registered order metadata."""
         return list(self._orders.values())
@@ -164,6 +181,7 @@ class OrderRegistry:
         """Clear all registered orders (for testing)."""
         self._orders.clear()
         self._trades.clear()
+        self._client_order_ids.clear()
 
     @property
     def size(self) -> int:
@@ -485,6 +503,10 @@ def _build_ib_order(order_spec: OrderSpec) -> Order:
     # Set transmit flag
     order.transmit = order_spec.transmit
 
+    # Preserve client idempotency key at the broker layer when provided.
+    if order_spec.clientOrderId:
+        order.orderRef = order_spec.clientOrderId
+
     # Apply OCA settings if present
     _apply_oca(order, order_spec)
 
@@ -548,6 +570,8 @@ def _build_bracket_orders(order_spec: OrderSpec) -> List[Order]:
     entry_order.tif = order_spec.tif.upper()
     entry_order.outsideRth = order_spec.outsideRth
     entry_order.transmit = False  # Don't transmit until children are attached
+    if order_spec.clientOrderId:
+        entry_order.orderRef = order_spec.clientOrderId
 
     # 2. Take profit order (limit on opposite side)
     tp_order = LimitOrder(
@@ -560,6 +584,8 @@ def _build_bracket_orders(order_spec: OrderSpec) -> List[Order]:
     tp_order.ocaGroup = oca_group
     tp_order.ocaType = 1  # Cancel with block
     tp_order.transmit = False  # Don't transmit until stop loss is set
+    if order_spec.clientOrderId:
+        tp_order.orderRef = order_spec.clientOrderId
 
     # 3. Stop loss order (stop or stop-limit on opposite side)
     if order_spec.stopLossLimitPrice is not None:
@@ -583,6 +609,8 @@ def _build_bracket_orders(order_spec: OrderSpec) -> List[Order]:
     sl_order.ocaGroup = oca_group
     sl_order.ocaType = 1  # Cancel with block
     sl_order.transmit = order_spec.bracketTransmit  # Final order transmits all
+    if order_spec.clientOrderId:
+        sl_order.orderRef = order_spec.clientOrderId
 
     return [entry_order, tp_order, sl_order]
 
@@ -646,9 +674,9 @@ def _trade_to_order_status(trade: Trade, order_id: str) -> OrderStatus:
                 warnings.append(log_entry.message)
 
     # Convert clientId to string if present
-    client_order_id = None
-    if hasattr(order, "clientId") and order.clientId is not None:
-        client_order_id = str(order.clientId)
+    client_order_id = getattr(order, "orderRef", None)
+    if client_order_id is not None and not isinstance(client_order_id, str):
+        client_order_id = None
 
     return OrderStatus(
         orderId=order_id,
@@ -982,6 +1010,39 @@ def place_order(
     client.ensure_connected()
 
     try:
+        if order_spec.clientOrderId:
+            existing_order_id = _order_registry.lookup_order_id_by_client_order_id(
+                order_spec.clientOrderId
+            )
+            existing_trade = _order_registry.lookup_by_client_order_id(order_spec.clientOrderId)
+            if existing_trade is None:
+                existing_trade = _find_trade_by_client_order_id(client, order_spec.clientOrderId)
+            if existing_trade is not None and existing_order_id is None:
+                perm_id = existing_trade.order.permId if existing_trade.order.permId else None
+                existing_order_id = (
+                    str(perm_id)
+                    if perm_id
+                    else f"ord_{existing_trade.order.orderId}"
+                )
+            if existing_trade and existing_order_id:
+                existing_status = _trade_to_order_status(existing_trade, existing_order_id)
+                logger.info(
+                    "Returning existing order for idempotent retry: clientOrderId=%s orderId=%s",
+                    order_spec.clientOrderId,
+                    existing_order_id,
+                )
+                return OrderResult(
+                    orderId=existing_order_id,
+                    clientOrderId=order_spec.clientOrderId,
+                    status=(
+                        "REJECTED"
+                        if existing_status.status in {"REJECTED", "CANCELLED"}
+                        else "ACCEPTED"
+                    ),
+                    orderStatus=existing_status,
+                    errors=[],
+                )
+
         # Resolve contract
         contract = resolve_contract(order_spec.instrument, client)
 
@@ -1018,7 +1079,7 @@ def place_order(
         trade = client.ib.placeOrder(contract, ib_order)
 
         # Register in our registry
-        order_id = _order_registry.register(trade, symbol)
+        order_id = _order_registry.register(trade, symbol, order_spec.clientOrderId)
 
         # Wait briefly for initial status
         client.ib.sleep(wait_for_status_s)
@@ -1180,7 +1241,7 @@ def _place_bracket_order(
     client.ib.sleep(wait_for_status_s)
 
     # Register all orders in our registry
-    entry_id = _order_registry.register(entry_trade, f"{symbol}_entry")
+    entry_id = _order_registry.register(entry_trade, f"{symbol}_entry", order_spec.clientOrderId)
     tp_id = _order_registry.register(tp_trade, f"{symbol}_tp")
     sl_id = _order_registry.register(sl_trade, f"{symbol}_sl")
 
@@ -1384,6 +1445,19 @@ def _find_trade_in_ibkr(client: IBKRClient, order_id: str) -> Optional[Trade]:
     return None
 
 
+def _find_trade_by_client_order_id(client: IBKRClient, client_order_id: str) -> Optional[Trade]:
+    """Search IBKR trades for a matching orderRef."""
+    for trade in client.ib.openTrades():
+        if getattr(trade.order, "orderRef", None) == client_order_id:
+            return trade
+
+    for trade in client.ib.trades():
+        if getattr(trade.order, "orderRef", None) == client_order_id:
+            return trade
+
+    return None
+
+
 def get_open_orders(client: IBKRClient) -> List[Dict]:
     """
     Get all open orders for this session.
@@ -1405,6 +1479,7 @@ def get_open_orders(client: IBKRClient) -> List[Dict]:
         orders.append(
             {
                 "order_id": order_id,
+                "client_order_id": getattr(trade.order, "orderRef", None),
                 "symbol": trade.contract.symbol if trade.contract else "Unknown",
                 "side": trade.order.action,
                 "quantity": trade.order.totalQuantity,

@@ -14,10 +14,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict
 
+from ibkr_core.paths import get_default_data_dir
+
 logger = logging.getLogger(__name__)
 
 CONFIG_PATH_ENV = "MM_IBKR_CONFIG_PATH"
-DEFAULT_CONFIG_PATH = Path("C:/ProgramData/mm-ibkr-gateway/config.json")
+DEFAULT_DATA_DIR = get_default_data_dir()
+DEFAULT_CONFIG_PATH = DEFAULT_DATA_DIR / "config.json"
 SCHEMA_VERSION = 1
 
 
@@ -30,7 +33,9 @@ def get_config_path() -> Path:
 
 
 def _default_config() -> Dict[str, Any]:
-    storage_dir = "C:\\ProgramData\\mm-ibkr-gateway\\storage"
+    storage_dir = DEFAULT_DATA_DIR / "storage"
+    log_dir = storage_dir / "logs"
+    watchdog_log_dir = DEFAULT_DATA_DIR / "logs"
     return {
         "schema_version": SCHEMA_VERSION,
         "api_bind_host": "127.0.0.1",
@@ -45,11 +50,11 @@ def _default_config() -> Dict[str, Any]:
         "ibkr_gateway_path": "",
         "log_level": "INFO",
         "log_format": "json",
-        "data_storage_dir": storage_dir,
-        "log_dir": f"{storage_dir}\\logs",
-        "audit_db_path": f"{storage_dir}\\audit.db",
-        "watchdog_log_dir": "C:\\ProgramData\\mm-ibkr-gateway\\logs",
-        "control_dir": "C:\\ProgramData\\mm-ibkr-gateway",
+        "data_storage_dir": str(storage_dir),
+        "log_dir": str(log_dir),
+        "audit_db_path": str(storage_dir / "audit.db"),
+        "watchdog_log_dir": str(watchdog_log_dir),
+        "control_dir": str(DEFAULT_DATA_DIR),
         "run_window_start": "04:00",
         "run_window_end": "20:00",
         "run_window_days": "Mon,Tue,Wed,Thu,Fri",
@@ -134,10 +139,10 @@ def _normalize_config(raw: Dict[str, Any]) -> Dict[str, Any]:
         merged.get("data_storage_dir"), defaults["data_storage_dir"]
     )
     merged["log_dir"] = _coerce_str(
-        merged.get("log_dir"), f"{merged['data_storage_dir']}\\logs"
+        merged.get("log_dir"), str(Path(merged["data_storage_dir"]) / "logs")
     )
     merged["audit_db_path"] = _coerce_str(
-        merged.get("audit_db_path"), f"{merged['data_storage_dir']}\\audit.db"
+        merged.get("audit_db_path"), str(Path(merged["data_storage_dir"]) / "audit.db")
     )
     merged["watchdog_log_dir"] = _coerce_str(
         merged.get("watchdog_log_dir"), defaults["watchdog_log_dir"]

@@ -1,6 +1,4 @@
-"""
-Pydantic models matching IBKR Core API Schema (from .context/SCHEMAS.md).
-"""
+"""Pydantic models matching IBKR Core API Schema."""
 
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -30,6 +28,7 @@ class SymbolSpec(BaseModel):
     @classmethod
     def validate_security_type(cls, v: str) -> str:
         """Validate security type against allowed enum."""
+        v = v.upper().strip()
         allowed = {"STK", "ETF", "FUT", "OPT", "IND", "CASH", "CFD", "BOND", "FUND", "CRYPTO"}
         if v not in allowed:
             raise ValueError(f"securityType must be one of {allowed}, got {v}")
@@ -39,9 +38,17 @@ class SymbolSpec(BaseModel):
     @classmethod
     def validate_right(cls, v: Optional[str]) -> Optional[str]:
         """Validate option right."""
-        if v is not None and v not in {"C", "P"}:
+        if v is None:
+            return None
+
+        normalized = v.upper().strip()
+        if normalized in {"CALL", "CALLS"}:
+            return "C"
+        if normalized in {"PUT", "PUTS"}:
+            return "P"
+        if normalized not in {"C", "P"}:
             raise ValueError(f"right must be 'C' or 'P', got {v}")
-        return v
+        return normalized
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -69,6 +76,45 @@ class Quote(BaseModel):
     source: str = Field(..., description="Source or feed identifier, e.g. 'IBKR_REALTIME'.")
 
 
+class ResolvedContract(BaseModel):
+    """Fully resolved IBKR contract details."""
+
+    symbol: str = Field(..., description="Resolved symbol.")
+    securityType: str = Field(..., description="IBKR security type code.")
+    conId: int = Field(..., description="IBKR contract identifier.")
+    exchange: Optional[str] = Field(None, description="Resolved exchange.")
+    primaryExchange: Optional[str] = Field(None, description="Primary exchange when available.")
+    currency: Optional[str] = Field(None, description="Resolved currency.")
+    localSymbol: Optional[str] = Field(None, description="IBKR local symbol.")
+    tradingClass: Optional[str] = Field(None, description="IBKR trading class.")
+    expiry: Optional[str] = Field(None, description="Expiry date in YYYY-MM-DD format.")
+    strike: Optional[float] = Field(None, ge=0, description="Strike price for options.")
+    right: Optional[str] = Field(None, description="Option right: C or P.")
+    multiplier: Optional[str] = Field(None, description="Contract multiplier.")
+
+
+class OptionGreeks(BaseModel):
+    """Single set of option greeks from IBKR."""
+
+    impliedVol: Optional[float] = Field(None, description="Implied volatility.")
+    delta: Optional[float] = Field(None, description="Option delta.")
+    optPrice: Optional[float] = Field(None, description="Theoretical option price.")
+    pvDividend: Optional[float] = Field(None, description="Present value of dividends.")
+    gamma: Optional[float] = Field(None, description="Option gamma.")
+    vega: Optional[float] = Field(None, description="Option vega.")
+    theta: Optional[float] = Field(None, description="Option theta.")
+    undPrice: Optional[float] = Field(None, description="Underlying price from the option model.")
+
+
+class OptionGreeksSet(BaseModel):
+    """Grouped option greeks from the various IBKR calculation buckets."""
+
+    model: Optional[OptionGreeks] = Field(None, description="Model greeks.")
+    bid: Optional[OptionGreeks] = Field(None, description="Bid greeks.")
+    ask: Optional[OptionGreeks] = Field(None, description="Ask greeks.")
+    last: Optional[OptionGreeks] = Field(None, description="Last-trade greeks.")
+
+
 class Bar(BaseModel):
     """Single OHLCV bar of historical or intraday data."""
 
@@ -83,6 +129,62 @@ class Bar(BaseModel):
         ..., description="Bar size as human string, e.g. '1 min', '5 mins', '1 day'."
     )
     source: str = Field(..., description="Data source, e.g. 'IBKR_HISTORICAL'.")
+
+
+class OptionContractCandidate(BaseModel):
+    """Qualified single-leg option contract candidate."""
+
+    symbol: str = Field(..., description="Underlying symbol.")
+    conId: int = Field(..., description="IBKR contract identifier.")
+    exchange: str = Field(..., description="Resolved exchange.")
+    currency: str = Field(..., description="Trading currency.")
+    expiry: str = Field(..., description="Expiry in YYYY-MM-DD format.")
+    strike: float = Field(..., ge=0, description="Strike price.")
+    right: str = Field(..., description="Option right: C or P.")
+    multiplier: Optional[str] = Field(None, description="Contract multiplier.")
+    localSymbol: Optional[str] = Field(None, description="IBKR local symbol.")
+    tradingClass: Optional[str] = Field(None, description="IBKR trading class.")
+
+
+class OptionChainResponse(BaseModel):
+    """Filtered option chain for an underlying instrument."""
+
+    underlying: ResolvedContract = Field(..., description="Resolved underlying contract.")
+    underlyingPrice: Optional[float] = Field(
+        None, description="Underlying last price when snapshot data is available."
+    )
+    exchange: Optional[str] = Field(None, description="Primary option exchange used.")
+    multiplier: Optional[str] = Field(None, description="Option contract multiplier.")
+    expirations: List[str] = Field(default_factory=list, description="Available expirations.")
+    strikes: List[float] = Field(default_factory=list, description="Available strikes.")
+    candidates: List[OptionContractCandidate] = Field(
+        default_factory=list,
+        description="Qualified contracts matching the requested filters.",
+    )
+    candidateCount: int = Field(..., ge=0, description="Number of candidates returned.")
+
+
+class OptionSnapshotResponse(BaseModel):
+    """Option quote plus greeks and volatility fields."""
+
+    contract: ResolvedContract = Field(..., description="Resolved option contract.")
+    quote: Quote = Field(..., description="Option quote snapshot.")
+    underlyingLastPrice: Optional[float] = Field(
+        None, description="Underlying last price when available."
+    )
+    impliedVolatility: Optional[float] = Field(
+        None, description="IBKR implied volatility field when available."
+    )
+    histVolatility: Optional[float] = Field(
+        None, description="IBKR historical volatility field when available."
+    )
+    rtHistVolatility: Optional[float] = Field(
+        None, description="IBKR real-time historical volatility field when available."
+    )
+    greeks: OptionGreeksSet = Field(
+        default_factory=OptionGreeksSet,
+        description="Grouped greek snapshots from IBKR.",
+    )
 
 
 class AccountSummary(BaseModel):
@@ -238,6 +340,7 @@ class OrderSpec(BaseModel):
     @classmethod
     def validate_side(cls, v: str) -> str:
         """Validate order side."""
+        v = v.upper().strip()
         if v not in {"BUY", "SELL"}:
             raise ValueError(f"side must be 'BUY' or 'SELL', got {v}")
         return v
@@ -246,6 +349,7 @@ class OrderSpec(BaseModel):
     @classmethod
     def validate_order_type(cls, v: str) -> str:
         """Validate order type."""
+        v = v.upper().strip()
         allowed = {"MKT", "LMT", "STP", "STP_LMT", "TRAIL", "TRAIL_LIMIT", "BRACKET", "MOC", "OPG"}
         if v not in allowed:
             raise ValueError(f"orderType must be one of {allowed}, got {v}")
@@ -255,6 +359,7 @@ class OrderSpec(BaseModel):
     @classmethod
     def validate_tif(cls, v: str) -> str:
         """Validate time-in-force."""
+        v = v.upper().strip()
         # MOC uses orderType with DAY TIF; OPG uses OPG TIF
         allowed = {"DAY", "GTC", "IOC", "FOK", "OPG"}
         if v not in allowed:

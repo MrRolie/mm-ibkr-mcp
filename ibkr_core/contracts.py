@@ -13,7 +13,7 @@ from typing import Dict, Optional, Tuple
 from ib_insync import Contract, Future, Index, Option, Stock
 
 from ibkr_core.client import IBKRClient
-from ibkr_core.models import SymbolSpec
+from ibkr_core.models import ResolvedContract, SymbolSpec
 
 logger = logging.getLogger(__name__)
 
@@ -67,22 +67,26 @@ class ContractCache:
     """
     In-memory cache for resolved contracts.
 
-    Keyed by (symbol, securityType, exchange, currency) tuple.
+    Keyed by the full SymbolSpec shape.
     No TTL - cache persists for lifetime of the cache instance.
     """
 
     def __init__(self):
-        self._cache: Dict[Tuple[str, str, str, str], Contract] = {}
+        self._cache: Dict[Tuple[str, str, str, str, str, str, str, str], Contract] = {}
         self._hits = 0
         self._misses = 0
 
-    def _make_key(self, spec: SymbolSpec) -> Tuple[str, str, str, str]:
+    def _make_key(self, spec: SymbolSpec) -> Tuple[str, str, str, str, str, str, str, str]:
         """Create cache key from SymbolSpec."""
         return (
             spec.symbol,
             spec.securityType,
             spec.exchange or "",
             spec.currency or "",
+            spec.expiry or "",
+            str(spec.strike) if spec.strike is not None else "",
+            spec.right or "",
+            spec.multiplier or "",
         )
 
     def get(self, spec: SymbolSpec) -> Optional[Contract]:
@@ -307,6 +311,39 @@ def resolve_contract(
         if isinstance(e, ContractResolutionError):
             raise
         raise ContractResolutionError(f"Failed to resolve contract for {spec.symbol}: {e}") from e
+
+
+def contract_to_resolved_contract(contract: Contract) -> ResolvedContract:
+    """Convert an IBKR contract object to the typed ResolvedContract model."""
+    expiry = getattr(contract, "lastTradeDateOrContractMonth", None)
+    if expiry:
+        expiry = str(expiry)
+        if len(expiry) == 8 and expiry.isdigit():
+            expiry = f"{expiry[:4]}-{expiry[4:6]}-{expiry[6:8]}"
+
+    right = getattr(contract, "right", None)
+    if right:
+        right = str(right).upper()
+
+    strike = getattr(contract, "strike", None)
+    strike_value = float(strike) if strike not in (None, "") else None
+
+    con_id = getattr(contract, "conId", None) or 0
+
+    return ResolvedContract(
+        symbol=contract.symbol,
+        securityType=contract.secType,
+        conId=int(con_id),
+        exchange=getattr(contract, "exchange", None) or None,
+        primaryExchange=getattr(contract, "primaryExchange", None) or None,
+        currency=getattr(contract, "currency", None) or None,
+        localSymbol=getattr(contract, "localSymbol", None) or None,
+        tradingClass=getattr(contract, "tradingClass", None) or None,
+        expiry=expiry,
+        strike=strike_value,
+        right=right,
+        multiplier=getattr(contract, "multiplier", None) or None,
+    )
 
 
 def resolve_contracts(

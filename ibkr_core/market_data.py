@@ -17,11 +17,24 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Callable, Dict, Generator, List, Optional
 
-from ib_insync import Contract, Ticker
+from ib_insync import Contract, Option, Ticker
 
 from ibkr_core.client import IBKRClient
-from ibkr_core.contracts import ContractResolutionError, resolve_contract
-from ibkr_core.models import Bar, Quote, SymbolSpec
+from ibkr_core.contracts import (
+    ContractResolutionError,
+    contract_to_resolved_contract,
+    resolve_contract,
+)
+from ibkr_core.models import (
+    Bar,
+    OptionChainResponse,
+    OptionContractCandidate,
+    OptionGreeks,
+    OptionGreeksSet,
+    OptionSnapshotResponse,
+    Quote,
+    SymbolSpec,
+)
 
 
 class QuoteMode(Enum):
@@ -1124,3 +1137,282 @@ def get_historical_bars(
     finally:
         # Unregister error handler
         client.ib.errorEvent -= on_error
+
+
+def _clean_optional_float(value) -> Optional[float]:
+    """Convert IBKR numeric fields to float while treating missing values as None."""
+    if value is None:
+        return None
+    if isinstance(value, float) and math.isnan(value):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _format_expiry(expiry: str) -> str:
+    """Normalize IBKR expiry strings to YYYY-MM-DD when possible."""
+    expiry = str(expiry)
+    if len(expiry) == 8 and expiry.isdigit():
+        return f"{expiry[:4]}-{expiry[4:6]}-{expiry[6:8]}"
+    return expiry
+
+
+def _build_option_greeks(computation) -> Optional[OptionGreeks]:
+    """Convert ib_insync option computation data to our typed model."""
+    if computation is None:
+        return None
+
+    values = {
+        "impliedVol": _clean_optional_float(getattr(computation, "impliedVol", None)),
+        "delta": _clean_optional_float(getattr(computation, "delta", None)),
+        "optPrice": _clean_optional_float(getattr(computation, "optPrice", None)),
+        "pvDividend": _clean_optional_float(getattr(computation, "pvDividend", None)),
+        "gamma": _clean_optional_float(getattr(computation, "gamma", None)),
+        "vega": _clean_optional_float(getattr(computation, "vega", None)),
+        "theta": _clean_optional_float(getattr(computation, "theta", None)),
+        "undPrice": _clean_optional_float(getattr(computation, "undPrice", None)),
+    }
+    if all(value is None for value in values.values()):
+        return None
+    return OptionGreeks(**values)
+
+
+def _normalize_rights(rights: Optional[List[str]]) -> List[str]:
+    """Normalize option rights to ['C', 'P']."""
+    if not rights:
+        return ["C", "P"]
+
+    normalized: List[str] = []
+    for right in rights:
+        spec = SymbolSpec(symbol="TMP", securityType="OPT", expiry="2099-01-01", strike=1.0, right=right)
+        if spec.right and spec.right not in normalized:
+            normalized.append(spec.right)
+    return normalized or ["C", "P"]
+
+
+def get_option_chain(
+    underlying_spec: SymbolSpec,
+    client: IBKRClient,
+    *,
+    expiries: Optional[List[str]] = None,
+    expiry_start: Optional[str] = None,
+    expiry_end: Optional[str] = None,
+    min_strike: Optional[float] = None,
+    max_strike: Optional[float] = None,
+    strike_count: int = 10,
+    max_candidates: int = 24,
+    rights: Optional[List[str]] = None,
+    option_exchange: Optional[str] = None,
+    timeout_s: float = 10.0,
+) -> OptionChainResponse:
+    """
+    Discover and qualify single-leg option contracts for an underlying.
+
+    Returns filtered expirations/strikes plus a bounded list of qualified contracts
+    suitable for LLM selection and downstream trading.
+    """
+    if underlying_spec.securityType == "OPT":
+        raise ValueError("underlying_spec must describe the underlying instrument, not an option")
+
+    if strike_count <= 0:
+        raise ValueError("strike_count must be positive")
+    if max_candidates <= 0:
+        raise ValueError("max_candidates must be positive")
+
+    client.ensure_connected()
+
+    underlying_contract = resolve_contract(underlying_spec, client)
+
+    underlying_quote = None
+    try:
+        underlying_quote = get_quote(underlying_spec, client, timeout_s=min(timeout_s, 5.0))
+    except MarketDataError as exc:
+        logger.info("Underlying quote unavailable for option chain %s: %s", underlying_spec.symbol, exc)
+
+    underlying_last = None
+    if underlying_quote is not None:
+        for candidate in (underlying_quote.last, underlying_quote.ask, underlying_quote.bid):
+            if candidate and candidate > 0:
+                underlying_last = candidate
+                break
+
+    sec_def_exchange = ""
+    if underlying_contract.secType == "FUT":
+        sec_def_exchange = option_exchange or underlying_contract.exchange or ""
+
+    option_chains = client.ib.reqSecDefOptParams(
+        underlying_contract.symbol,
+        sec_def_exchange,
+        underlying_contract.secType,
+        underlying_contract.conId,
+    )
+    if not option_chains:
+        raise NoMarketDataError(f"No option chain returned for {underlying_spec.symbol}")
+
+    preferred_exchange = option_exchange or underlying_spec.exchange or "SMART"
+    sorted_chains = sorted(
+        option_chains,
+        key=lambda chain: (
+            0 if chain.exchange == preferred_exchange else 1,
+            0 if chain.exchange == "SMART" else 1,
+            chain.exchange,
+        ),
+    )
+    selected_chain = sorted_chains[0]
+
+    normalized_expiries = sorted(
+        {_format_expiry(expiry) for expiry in selected_chain.expirations},
+    )
+    if expiries:
+        expiry_filter = {_format_expiry(expiry) for expiry in expiries}
+        normalized_expiries = [expiry for expiry in normalized_expiries if expiry in expiry_filter]
+    if expiry_start:
+        normalized_expiries = [expiry for expiry in normalized_expiries if expiry >= expiry_start]
+    if expiry_end:
+        normalized_expiries = [expiry for expiry in normalized_expiries if expiry <= expiry_end]
+
+    normalized_strikes = sorted(float(strike) for strike in selected_chain.strikes)
+    if min_strike is not None:
+        normalized_strikes = [strike for strike in normalized_strikes if strike >= min_strike]
+    if max_strike is not None:
+        normalized_strikes = [strike for strike in normalized_strikes if strike <= max_strike]
+
+    if underlying_last is not None and normalized_strikes:
+        normalized_strikes = sorted(
+            normalized_strikes,
+            key=lambda strike: (abs(strike - underlying_last), strike),
+        )[:strike_count]
+        normalized_strikes.sort()
+    else:
+        normalized_strikes = normalized_strikes[:strike_count]
+
+    normalized_rights = _normalize_rights(rights)
+    expiries_for_candidates = normalized_expiries
+    option_currency = underlying_contract.currency or underlying_spec.currency or "USD"
+    option_exchange = option_exchange or selected_chain.exchange or underlying_spec.exchange or "SMART"
+
+    candidate_contracts: List[Contract] = []
+    for expiry in expiries_for_candidates:
+        for strike in normalized_strikes:
+            for right in normalized_rights:
+                if len(candidate_contracts) >= max_candidates:
+                    break
+                option_contract = Option(
+                    symbol=underlying_contract.symbol,
+                    lastTradeDateOrContractMonth=expiry.replace("-", ""),
+                    strike=strike,
+                    right=right,
+                    exchange=option_exchange,
+                    currency=option_currency,
+                )
+                if selected_chain.multiplier:
+                    option_contract.multiplier = selected_chain.multiplier
+                if selected_chain.tradingClass:
+                    option_contract.tradingClass = selected_chain.tradingClass
+                candidate_contracts.append(option_contract)
+            if len(candidate_contracts) >= max_candidates:
+                break
+        if len(candidate_contracts) >= max_candidates:
+            break
+
+    qualified_contracts = client.ib.qualifyContracts(*candidate_contracts) if candidate_contracts else []
+    candidates = [
+        OptionContractCandidate(
+            symbol=contract.symbol,
+            conId=contract.conId,
+            exchange=contract.exchange or option_exchange,
+            currency=contract.currency or option_currency,
+            expiry=_format_expiry(contract.lastTradeDateOrContractMonth),
+            strike=float(contract.strike),
+            right=contract.right,
+            multiplier=contract.multiplier or selected_chain.multiplier or None,
+            localSymbol=getattr(contract, "localSymbol", None) or None,
+            tradingClass=getattr(contract, "tradingClass", None) or None,
+        )
+        for contract in qualified_contracts
+    ]
+
+    return OptionChainResponse(
+        underlying=contract_to_resolved_contract(underlying_contract),
+        underlyingPrice=underlying_last,
+        exchange=selected_chain.exchange or option_exchange,
+        multiplier=selected_chain.multiplier or None,
+        expirations=normalized_expiries,
+        strikes=normalized_strikes,
+        candidates=candidates,
+        candidateCount=len(candidates),
+    )
+
+
+def get_option_snapshot(
+    option_spec: SymbolSpec,
+    client: IBKRClient,
+    *,
+    timeout_s: float = 5.0,
+) -> OptionSnapshotResponse:
+    """
+    Get a single-leg option snapshot including quote and greeks when available.
+
+    The quote is required; greeks and volatility fields are returned opportunistically.
+    """
+    if option_spec.securityType != "OPT":
+        raise ValueError("option_spec.securityType must be 'OPT'")
+    if not option_spec.expiry or option_spec.strike is None or not option_spec.right:
+        raise ValueError("Fully specified option contracts require expiry, strike, and right")
+
+    client.ensure_connected()
+
+    contract = resolve_contract(option_spec, client)
+    quote = get_quote(option_spec, client, timeout_s=timeout_s)
+
+    errors: List[tuple[int, str]] = []
+
+    def on_error(reqId: int, errorCode: int, errorString: str, contract):
+        errors.append((errorCode, errorString))
+
+    client.ib.errorEvent += on_error
+    try:
+        ticker = client.ib.reqMktData(contract, "100,101,104,106", snapshot=True)
+        deadline = time.time() + timeout_s
+        while time.time() < deadline:
+            client.ib.sleep(POLL_INTERVAL_S)
+            if (
+                _build_option_greeks(getattr(ticker, "modelGreeks", None))
+                or _clean_optional_float(getattr(ticker, "impliedVolatility", None)) is not None
+            ):
+                break
+        for error_code, error_msg in errors:
+            exc = _check_ibkr_error_code(error_code, error_msg)
+            if isinstance(exc, (ContractResolutionError, PacingViolationError)):
+                raise exc
+            if exc:
+                logger.info("Option snapshot returned partial data for %s: %s", option_spec.symbol, exc)
+                break
+
+        greek_sets = OptionGreeksSet(
+            model=_build_option_greeks(getattr(ticker, "modelGreeks", None)),
+            bid=_build_option_greeks(getattr(ticker, "bidGreeks", None)),
+            ask=_build_option_greeks(getattr(ticker, "askGreeks", None)),
+            last=_build_option_greeks(getattr(ticker, "lastGreeks", None)),
+        )
+
+        underlying_last = None
+        for greek_bucket in (greek_sets.model, greek_sets.last, greek_sets.bid, greek_sets.ask):
+            if greek_bucket and greek_bucket.undPrice is not None:
+                underlying_last = greek_bucket.undPrice
+                break
+
+        return OptionSnapshotResponse(
+            contract=contract_to_resolved_contract(contract),
+            quote=quote,
+            underlyingLastPrice=underlying_last,
+            impliedVolatility=_clean_optional_float(getattr(ticker, "impliedVolatility", None)),
+            histVolatility=_clean_optional_float(getattr(ticker, "histVolatility", None)),
+            rtHistVolatility=_clean_optional_float(getattr(ticker, "rtHistVolatility", None)),
+            greeks=greek_sets,
+        )
+    finally:
+        client.ib.errorEvent -= on_error
+        client.ib.cancelMktData(contract)

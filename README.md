@@ -11,6 +11,75 @@ A complete, modular integration of Interactive Brokers (IBKR) with multiple inte
 Querying Claude for Available Tools
 ![Claude MCP Integration](images/claude_mcp_integrated.png)
 
+## MCP Server
+
+The MCP server is now a direct `ibkr_core` server instead of a REST proxy. It supports:
+
+- `stdio` transport for local Claude Code / MCP desktop workflows
+- `streamable-http` at `/mcp` for hosted or remote MCP clients
+- bearer-token auth for HTTP mode
+- canonical `ibkr_*` tool names with structured output schemas and annotations
+- options v1 support for single-leg contract discovery and greeks snapshots
+- Claude Code resources and prompts in addition to tools
+
+### Launching MCP
+
+Local stdio:
+
+```bash
+uv sync
+uv run ibkr-mcp
+```
+
+Hosted Streamable HTTP:
+
+```bash
+export MCP_TRANSPORT=streamable-http
+export MCP_HOST=127.0.0.1
+export MCP_PORT=8001
+export MCP_AUTH_TOKEN=change-me
+export MCP_PUBLIC_BASE_URL=http://127.0.0.1:8001
+uv run ibkr-mcp
+```
+
+Primary canonical tools:
+
+- `ibkr_health`
+- `ibkr_get_trading_status`
+- `ibkr_get_schedule_status`
+- `ibkr_resolve_contract`
+- `ibkr_get_quote`
+- `ibkr_get_historical_bars`
+- `ibkr_get_account_summary`
+- `ibkr_get_positions`
+- `ibkr_get_pnl`
+- `ibkr_list_open_orders`
+- `ibkr_get_order_status`
+- `ibkr_get_order_set_status`
+- `ibkr_preview_order`
+- `ibkr_place_order`
+- `ibkr_cancel_order`
+- `ibkr_cancel_order_set`
+- `ibkr_get_option_chain`
+- `ibkr_get_option_snapshot`
+
+Admin tools are disabled by default and appear only when `MCP_ENABLE_ADMIN_TOOLS=true`.
+Legacy non-namespaced aliases are also opt-in via `MCP_ENABLE_LEGACY_ALIASES=true`.
+
+Claude Code resources:
+
+- `ibkr://status/overview`
+- `ibkr://account/default/summary`
+- `ibkr://account/default/positions`
+- `ibkr://orders/open`
+- `ibkr://options/chain/{symbol}`
+
+Claude Code prompts:
+
+- `pre_trade_checklist`
+- `option_contract_selection`
+- `order_review`
+
 ## ⚠️ SAFETY FIRST ⚠️
 
 This system is **SAFE BY DEFAULT**:
@@ -69,7 +138,7 @@ cp .env.example .env
 # 2. Ensure control.json is in paper mode (default)
 
 # 3. Install dependencies
-poetry install
+uv sync
 
 # 4. Run the demo
 python -m ibkr_core.demo

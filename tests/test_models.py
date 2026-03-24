@@ -34,6 +34,11 @@ class TestSymbolSpec:
         assert spec.symbol == "AAPL"
         assert spec.securityType == "STK"
 
+    def test_security_type_is_normalized(self):
+        """Test security type normalization for LLM-friendly lowercase input."""
+        spec = SymbolSpec(symbol="AAPL", securityType="stk")
+        assert spec.securityType == "STK"
+
     def test_valid_futures_symbol(self):
         """Test valid futures symbol spec."""
         spec = SymbolSpec(symbol="MES", securityType="FUT", exchange="GLOBEX", currency="USD")
@@ -51,6 +56,17 @@ class TestSymbolSpec:
             symbol="SPX", securityType="OPT", strike=5000.0, right="C", expiry="2024-12-20"
         )
         assert spec.strike == 5000.0
+        assert spec.right == "C"
+
+    def test_option_right_is_normalized(self):
+        """Test friendly option right inputs normalize to C/P."""
+        spec = SymbolSpec(
+            symbol="SPX",
+            securityType="OPT",
+            strike=5000.0,
+            right="call",
+            expiry="2024-12-20",
+        )
         assert spec.right == "C"
 
     def test_invalid_option_right(self):
@@ -198,12 +214,13 @@ class TestOrderSpec:
         """Test valid market order spec."""
         spec = OrderSpec(
             instrument=SymbolSpec(symbol="AAPL", securityType="STK"),
-            side="BUY",
+            side="buy",
             quantity=100.0,
-            orderType="MKT",
+            orderType="mkt",
         )
         assert spec.side == "BUY"
         assert spec.quantity == 100.0
+        assert spec.orderType == "MKT"
         assert spec.tif == "DAY"  # default
 
     def test_valid_limit_order(self):

@@ -12,9 +12,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, Optional
 
+from ibkr_core.paths import get_default_data_dir
+
 logger = logging.getLogger(__name__)
 
-DEFAULT_CONTROL_DIR = Path("C:/ProgramData/mm-ibkr-gateway")
+DEFAULT_CONTROL_DIR = get_default_data_dir()
 
 
 @dataclass

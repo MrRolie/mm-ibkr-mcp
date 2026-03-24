@@ -385,6 +385,22 @@ class TestOrderRegistry:
         assert metadata["symbol"] == "AAPL"
         assert metadata["perm_id"] == 123456789
 
+    def test_registry_tracks_client_order_id(self):
+        """Test client_order_id lookup for idempotent retries."""
+        registry = OrderRegistry()
+
+        mock_trade = MagicMock()
+        mock_trade.order.permId = 123456789
+        mock_trade.order.orderId = 1
+        mock_trade.order.clientId = 1
+        mock_trade.order.orderRef = "retry-123"
+        mock_trade.contract.conId = 265598
+
+        order_id = registry.register(mock_trade, "AAPL", client_order_id="retry-123")
+
+        assert registry.lookup_order_id_by_client_order_id("retry-123") == order_id
+        assert registry.lookup_by_client_order_id("retry-123") is mock_trade
+
     def test_registry_lookup_not_found(self):
         """Test that lookup returns None for unknown order."""
         registry = OrderRegistry()

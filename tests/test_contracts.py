@@ -122,6 +122,40 @@ class TestContractCache:
         assert cache.get(spec1).conId == 1
         assert cache.get(spec2).conId == 2
 
+    def test_cache_key_distinguishes_option_strike_and_right(self):
+        """Options with different contract terms must not collide in cache."""
+        cache = ContractCache()
+
+        call_spec = SymbolSpec(
+            symbol="AAPL",
+            securityType="OPT",
+            exchange="SMART",
+            currency="USD",
+            expiry="2026-04-17",
+            strike=100.0,
+            right="C",
+        )
+        put_spec = SymbolSpec(
+            symbol="AAPL",
+            securityType="OPT",
+            exchange="SMART",
+            currency="USD",
+            expiry="2026-04-17",
+            strike=105.0,
+            right="P",
+        )
+
+        call_contract = MagicMock()
+        call_contract.conId = 101
+        put_contract = MagicMock()
+        put_contract.conId = 202
+
+        cache.put(call_spec, call_contract)
+        cache.put(put_spec, put_contract)
+
+        assert cache.get(call_spec).conId == 101
+        assert cache.get(put_spec).conId == 202
+
     def test_clear(self):
         """Test clearing cache."""
         cache = ContractCache()

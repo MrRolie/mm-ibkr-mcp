@@ -86,41 +86,82 @@ curl http://localhost:8000/orders/open
 
 ```bash
 # Quotes
-poetry run python -m ibkr_core.cli quote AAPL
-poetry run python -m ibkr_core.cli quote AAPL --mode paper
+uv run python -m ibkr_core.cli quote AAPL
+uv run python -m ibkr_core.cli quote AAPL --mode paper
 
 # Historical data
-poetry run python -m ibkr_core.cli bars AAPL --duration "5 D" --bar-size "1 hour"
+uv run python -m ibkr_core.cli bars AAPL --duration "5 D" --bar-size "1 hour"
 
 # Account
-poetry run python -m ibkr_core.cli account
-poetry run python -m ibkr_core.cli positions
-poetry run python -m ibkr_core.cli pnl
+uv run python -m ibkr_core.cli account
+uv run python -m ibkr_core.cli positions
+uv run python -m ibkr_core.cli pnl
 
 # Orders
-poetry run python -m ibkr_core.cli preview BUY 10 AAPL --order-type LMT --limit-price 150
-poetry run python -m ibkr_core.cli order BUY 10 AAPL --order-type MKT
-poetry run python -m ibkr_core.cli cancel <order_id>
-poetry run python -m ibkr_core.cli status <order_id>
+uv run python -m ibkr_core.cli preview BUY 10 AAPL --order-type LMT --limit-price 150
+uv run python -m ibkr_core.cli order BUY 10 AAPL --order-type MKT
+uv run python -m ibkr_core.cli cancel <order_id>
+uv run python -m ibkr_core.cli status <order_id>
 ```
 
 ## MCP Tools
 
-Available via MCP server for LLM integration:
+Primary MCP transport for hosted clients:
+
+- `streamable-http` on `/mcp`
+- bearer token required via `MCP_AUTH_TOKEN`
+- stdio remains available for local Claude Code / desktop workflows
+
+Canonical tool surface:
 
 | Tool | Description |
 | ------ | ------------- |
-| `ibkr_health` | Check gateway connection status |
-| `ibkr_quote` | Get real-time quote |
-| `ibkr_historical` | Get historical bars |
-| `ibkr_account_summary` | Account balances |
-| `ibkr_positions` | Open positions |
-| `ibkr_pnl` | Profit/loss |
-| `ibkr_preview_order` | Preview order execution |
-| `ibkr_place_order` | Place order (if enabled) |
-| `ibkr_cancel_order` | Cancel order |
-| `ibkr_order_status` | Get order status |
-| `ibkr_open_orders` | List open orders |
+| `ibkr_health` | Gateway connectivity and runtime health |
+| `ibkr_get_trading_status` | Trading-control state from `control.json` |
+| `ibkr_get_schedule_status` | Current run-window status |
+| `ibkr_resolve_contract` | Resolve a `SymbolSpec` into a qualified IBKR contract |
+| `ibkr_get_quote` | Snapshot quote for a fully specified instrument |
+| `ibkr_get_historical_bars` | Historical OHLCV bars |
+| `ibkr_get_account_summary` | Account balances, buying power, margin |
+| `ibkr_get_positions` | Open positions |
+| `ibkr_get_pnl` | Account P&L with per-symbol breakdown |
+| `ibkr_list_open_orders` | Open orders on the active connection |
+| `ibkr_get_order_status` | Status for a single order id |
+| `ibkr_get_order_set_status` | Aggregate status for related order ids |
+| `ibkr_preview_order` | Order preview without placement |
+| `ibkr_place_order` | Place an order; `clientOrderId` is required |
+| `ibkr_cancel_order` | Cancel a single order |
+| `ibkr_cancel_order_set` | Cancel a related set of orders |
+| `ibkr_get_option_chain` | Discover single-leg option contracts |
+| `ibkr_get_option_snapshot` | Quote + IV + greeks for a fully specified option |
+
+Optional admin tools, disabled by default:
+
+| Tool | Description |
+| ------ | ------------- |
+| `ibkr_admin_verify_gateway` | Verify gateway access by fetching account summary |
+| `ibkr_admin_update_trading_control` | Compare-and-swap update for `control.json` |
+
+Enable admin tools with `MCP_ENABLE_ADMIN_TOOLS=true`.
+Enable legacy aliases with `MCP_ENABLE_LEGACY_ALIASES=true`.
+
+## Claude Code Resources And Prompts
+
+Resources:
+
+- `ibkr://status/overview`
+- `ibkr://account/default/summary`
+- `ibkr://account/default/positions`
+- `ibkr://orders/open`
+- `ibkr://options/chain/{symbol}`
+
+Prompts:
+
+- `pre_trade_checklist`
+- `option_contract_selection`
+- `order_review`
+
+These are useful in Claude Code. Anthropic's remote MCP connector currently relies on tool calls as the primary integration contract.
 
 ## Request/Response Models
 
@@ -134,7 +175,8 @@ Available via MCP server for LLM integration:
   "currency": "USD",
   "expiry": null,              // For options/futures
   "strike": null,              // For options
-  "right": null                // "C" or "P" for options
+  "right": null,               // "C" or "P" for options
+  "multiplier": null
 }
 ```
 
@@ -148,7 +190,8 @@ Available via MCP server for LLM integration:
   "orderType": "LMT",          // MKT, LMT, STP, STP_LMT, TRAIL, etc.
   "limitPrice": 150.00,        // Required for LMT
   "stopPrice": null,           // For STP orders
-  "accountId": null            // Optional, uses default
+  "accountId": null,           // Optional, uses default
+  "clientOrderId": "retry-key-123"
 }
 ```
 
@@ -173,13 +216,12 @@ Available via MCP server for LLM integration:
 ```json
 {
   "orderId": "uuid-here",
+  "clientOrderId": "retry-key-123",
   "status": "ACCEPTED",        // ACCEPTED, REJECTED, SIMULATED
-  "message": "Order placed successfully",
-  "ibkrOrderId": 12345,
   "orderStatus": {
-    "status": "Submitted",
-    "filled": 0,
-    "remaining": 100,
+    "status": "SUBMITTED",
+    "filledQuantity": 0,
+    "remainingQuantity": 100,
     "avgFillPrice": 0.0
   }
 }
