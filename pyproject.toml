@@ -6,7 +6,7 @@ build-backend = "poetry.core.masonry.api"
 name = "mm-ibkr-gateway"
 version = "0.1.0"
 description = "IBKR integration + MCP tool server + NL interface"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [
     {name = "Your Name", email = "your.email@example.com"}
 ]
@@ -24,7 +24,7 @@ packages = [
 ]
 
 [tool.poetry.dependencies]
-python = "^3.10"
+python = "^3.11"
 ib-insync = ">=0.9.17,<1.0"
 fastapi = ">=0.104.0,<1.0"
 uvicorn = ">=0.30,<1.0"
@@ -60,14 +60,14 @@ pre-commit = "^3.6"
 
 [tool.black]
 line-length = 100
-target-version = ["py310"]
+target-version = ["py311", "py312"]
 
 [tool.isort]
 profile = "black"
 line_length = 100
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
 check_untyped_defs = false

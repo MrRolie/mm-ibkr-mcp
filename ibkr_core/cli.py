@@ -162,7 +162,11 @@ def healthcheck(
 
         # Get server time
         server_time = broker.request_current_time()
-        server_dt = datetime.fromtimestamp(server_time)
+        server_dt = (
+            server_time
+            if isinstance(server_time, datetime)
+            else datetime.fromtimestamp(server_time)
+        )
 
         # Get managed accounts
         accounts = broker.managed_accounts()

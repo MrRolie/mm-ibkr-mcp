@@ -115,8 +115,13 @@ def check_gateway_connection(client: Optional[IBKRClient] = None) -> bool:
         # Connection test is implicit in create_client
         broker = get_broker_adapter(client)
         server_time = broker.request_current_time()
+        server_dt = (
+            server_time
+            if isinstance(server_time, datetime)
+            else datetime.fromtimestamp(server_time)
+        )
         print_success("Connected to IBKR Gateway")
-        print_info("Server Time", str(datetime.fromtimestamp(server_time)))
+        print_info("Server Time", str(server_dt))
 
         # Get managed accounts
         accounts = broker.managed_accounts()

@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/MrRolie/mm-ibkr-gateway/workflows/CI/badge.svg)](https://github.com/MrRolie/mm-ibkr-gateway/actions)
 [![codecov](https://codecov.io/gh/MrRolie/mm-ibkr-gateway/branch/main/graph/badge.svg)](https://codecov.io/gh/MrRolie/mm-ibkr-gateway)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
@@ -511,7 +511,7 @@ Use with Claude Desktop or any MCP-compatible client for natural language intera
 
 ### Prerequisites
 
-- Python 3.10+
+- Python 3.11+
 - Running IBKR Gateway or TWS (Paper account recommended)
 - Poetry or pip for dependency management
 
@@ -801,7 +801,7 @@ All pull requests are automatically tested with:
 - ✅ Code formatting (black, isort)
 - ✅ Linting (flake8)
 - ✅ Type checking (mypy)
-- ✅ Unit tests on Python 3.10, 3.11, 3.12
+- ✅ Unit tests on Python 3.11 and 3.12
 - ✅ Coverage reporting (codecov)
 - ✅ Security scanning (safety, bandit)
 

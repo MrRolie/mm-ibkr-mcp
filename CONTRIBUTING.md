@@ -6,7 +6,7 @@ Thank you for your interest in contributing! This document provides guidelines f
 
 ### Prerequisites
 
-- Python 3.10 or higher
+- Python 3.11 or higher
 - Poetry for dependency management
 - IBKR account with paper trading access (for integration tests)
 - IBKR Gateway or TWS

@@ -19,11 +19,11 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 
-from ib_insync import Contract, Future, Option, Stock
+from ib_insync import Contract
 
 from ibkr_core.client import IBKRClient
 from ibkr_core.config import Config, get_config
@@ -650,7 +650,7 @@ class SimulatedBrokerAdapter:
         if qualified.secType != "FUT" or getattr(qualified, "lastTradeDateOrContractMonth", None):
             return [SimulatedContractDetails(contract=qualified)]
 
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
         expiries: List[str] = []
         for offset in range(4):
             month_index = now.month + offset
@@ -728,7 +728,7 @@ class SimulatedBrokerAdapter:
         reference_quote = self.request_market_data(qualified, snapshot=True)
         step = self._bar_delta(bar_size_setting)
         count = self._bar_count(duration_str, step)
-        anchor = datetime.now(UTC)
+        anchor = datetime.now(timezone.utc)
         price = float(reference_quote.last or reference_quote.bid or reference_quote.ask or 100.0)
 
         bars: List[SimulatedHistoricalBar] = []
@@ -768,7 +768,7 @@ class SimulatedBrokerAdapter:
         base_strike = round(center / 5) * 5
         strikes = [float(base_strike + step) for step in (-10, -5, 0, 5, 10)]
 
-        next_friday = datetime.now(UTC)
+        next_friday = datetime.now(timezone.utc)
         while next_friday.weekday() != 4:
             next_friday += timedelta(days=1)
         expirations = [
@@ -958,7 +958,9 @@ class SimulatedBrokerAdapter:
         if not getattr(contract, "conId", None):
             contract.conId = self._stable_int(self._contract_key(contract))
         if contract.secType == "FUT" and not getattr(contract, "lastTradeDateOrContractMonth", None):
-            contract.lastTradeDateOrContractMonth = datetime.now(UTC).strftime("%Y%m")
+            contract.lastTradeDateOrContractMonth = datetime.now(timezone.utc).strftime(
+                "%Y%m"
+            )
         if contract.secType == "OPT":
             contract.exchange = getattr(contract, "exchange", None) or "SMART"
             contract.multiplier = getattr(contract, "multiplier", None) or "100"
@@ -1050,6 +1052,8 @@ class SimulatedBrokerAdapter:
             return timedelta(days=amount)
         if "week" in normalized:
             return timedelta(weeks=amount)
+        if "month" in normalized:
+            return timedelta(days=30 * amount)
         return timedelta(minutes=amount)
 
     def _bar_count(self, duration_str: str, step: timedelta) -> int:
@@ -1057,7 +1061,7 @@ class SimulatedBrokerAdapter:
         amount = int(normalized.split()[0])
         if "week" in normalized or normalized.endswith(" w"):
             total = timedelta(weeks=amount)
-        elif "month" in normalized or normalized.endswith(" m") and step >= timedelta(days=1):
+        elif "month" in normalized or normalized.endswith(" m"):
             total = timedelta(days=30 * amount)
         elif "year" in normalized or normalized.endswith(" y"):
             total = timedelta(days=365 * amount)
@@ -1065,6 +1069,8 @@ class SimulatedBrokerAdapter:
             total = timedelta(days=amount)
         elif "hour" in normalized or normalized.endswith(" h"):
             total = timedelta(hours=amount)
+        elif "sec" in normalized or normalized.endswith(" s"):
+            total = timedelta(seconds=amount)
         else:
             total = timedelta(minutes=amount)
         return max(5, min(60, int(total / step) if step.total_seconds() > 0 else 20))

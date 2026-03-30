@@ -6,7 +6,7 @@ IBKR client, allowing full integration testing without a live gateway.
 """
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -230,6 +230,23 @@ class TestSimulationCoreAdapterFlows:
         assert quote.ask >= quote.bid
         assert len(bars) >= 5
         assert all(bar.symbol == "AAPL" for bar in bars)
+
+    def test_core_historical_month_bars_use_month_spacing(self, client):
+        spec = SymbolSpec(symbol="AAPL", securityType="STK")
+
+        bars = get_historical_bars(spec, client, bar_size="1mo", duration="3mo", timeout_s=0.5)
+
+        assert len(bars) >= 5
+        assert all(bar.barSize == "1 month" for bar in bars)
+        assert (bars[1].time - bars[0].time).days >= 28
+
+    def test_core_historical_second_durations_do_not_expand_to_minutes(self, client):
+        spec = SymbolSpec(symbol="AAPL", securityType="STK")
+
+        bars = get_historical_bars(spec, client, bar_size="1m", duration="300s", timeout_s=0.5)
+
+        assert len(bars) == 5
+        assert all(bar.barSize == "1 min" for bar in bars)
 
     def test_core_option_chain_and_snapshot_use_simulation_broker(self, client):
         underlying = SymbolSpec(symbol="AAPL", securityType="STK")
