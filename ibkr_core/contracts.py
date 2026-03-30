@@ -12,6 +12,7 @@ from typing import Dict, Optional, Tuple
 
 from ib_insync import Contract, Future, Index, Option, Stock
 
+from ibkr_core.broker import get_broker_adapter
 from ibkr_core.client import IBKRClient
 from ibkr_core.models import ResolvedContract, SymbolSpec
 
@@ -259,6 +260,8 @@ def resolve_contract(
     if not client.is_connected:
         raise ContractResolutionError("Client is not connected to IBKR")
 
+    broker = get_broker_adapter(client)
+
     # Build the contract
     contract = _build_contract(spec)
 
@@ -269,7 +272,7 @@ def resolve_contract(
         # to find the front month
         if spec.securityType == "FUT" and not spec.expiry:
             # Get all available contracts for this future
-            details = client.ib.reqContractDetails(contract)
+            details = broker.request_contract_details(contract)
             if not details:
                 raise ContractNotFoundError(
                     f"No contract found for {spec.symbol} ({spec.securityType}) "
@@ -286,7 +289,7 @@ def resolve_contract(
             )
         else:
             # Qualify with IBKR - this fills in conId and other fields
-            qualified_contracts = client.ib.qualifyContracts(contract)
+            qualified_contracts = broker.qualify_contracts(contract)
 
             if not qualified_contracts:
                 raise ContractNotFoundError(

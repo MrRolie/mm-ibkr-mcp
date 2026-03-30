@@ -3,6 +3,7 @@
 .vscode/
 .benchmarks/
 data/
+AGENTS.md
 
 # Secrets and credentials
 secrets/

@@ -12,18 +12,20 @@
                                  │
                     ┌────────────▼────────────┐
                     │      ibkr_core          │
-                    │  (Business Logic)       │
+                    │  (Gateway Policy +      │
+                    │   Business Logic)       │
                     │  - orders.py            │
                     │  - market_data.py       │
                     │  - account.py           │
                     └────────────┬────────────┘
-                                 │
-              ┌──────────────────┼─────────────────┐
-              │                  │                 │
-    ┌─────────▼─────────┐ ┌──────▼──────┐ ┌────────▼────────┐
-    │   IBKRClient      │ │ Persistence │ │    Metrics      │
-    │ (ib_insync wrap)  │ │  (SQLite)   │ │  (In-memory)    │
-    └─────────┬─────────┘ └─────────────┘ └─────────────────┘
+                                  │
+              ┌──────────────────┼──────────────────────┐
+              │                  │                      │
+    ┌─────────▼─────────┐ ┌──────▼──────┐ ┌─────────────▼─────────────┐
+    │   Broker Adapter  │ │ Persistence │ │          Metrics           │
+    │  (current backend │ │  (SQLite)   │ │        (In-memory)         │
+    │   = ib_insync)    │ └─────────────┘ └───────────────────────────┘
+    └─────────┬─────────┘
               │
     ┌─────────▼─────────┐
     │  IBKR Gateway/TWS │
@@ -35,20 +37,29 @@
 
 ### `ibkr_core/client.py` - IBKRClient
 
-Wrapper around `ib_insync.IB` providing:
+Connection wrapper that owns the active broker adapter providing:
 
 - Dual mode support (paper/live)
 - Connection lifecycle management
 - Structured logging with correlation IDs
 - Metrics recording
+- Backend seam for future `ib_async` support
 
 ```python
 from ibkr_core.client import IBKRClient
 
 with IBKRClient(mode="paper") as client:
-    # client.ib is the underlying ib_insync.IB instance
+    # client.broker is the backend adapter
     accounts = client.managed_accounts
 ```
+
+### `ibkr_core/broker.py` - Broker Adapter
+
+Backend seam for broker-library integration:
+
+- `IBInsyncBrokerAdapter` is the current implementation
+- core modules can migrate off direct `client.ib` usage incrementally
+- a future `ib_async` backend can implement the same adapter surface
 
 ### `ibkr_core/models.py` - Domain Models
 

@@ -1,7 +1,7 @@
 """
 IBKR Client wrapper for managing connections to Interactive Brokers Gateway/TWS.
 
-Provides a stable, reconnection-aware wrapper around ib_insync.IB with:
+Provides a stable, reconnection-aware wrapper around the current broker backend with:
 - Dual mode support (paper/live)
 - Automatic connection management
 - Structured logging
@@ -15,6 +15,7 @@ from typing import List, Optional
 
 from ib_insync import IB
 
+from ibkr_core.broker import BrokerAdapter, IBInsyncBrokerAdapter
 from ibkr_core.config import Config, get_config
 from ibkr_core.logging_config import log_with_context
 from ibkr_core.metrics import record_ibkr_operation, set_connection_status
@@ -30,7 +31,7 @@ class ConnectionError(Exception):
 
 class IBKRClient:
     """
-    Wrapper around ib_insync.IB for IBKR Gateway/TWS connections.
+    Wrapper around the active broker backend for IBKR Gateway/TWS connections.
 
     Handles connection lifecycle, reconnection logic, and provides
     a clean interface for the rest of the application.
@@ -38,12 +39,12 @@ class IBKRClient:
     Usage:
         client = IBKRClient()
         client.connect()
-        # ... use client.ib for operations ...
+        # ... use client.broker for adapted operations ...
         client.disconnect()
 
     Or as context manager:
         with IBKRClient() as client:
-            # ... use client.ib for operations ...
+            # ... use client.broker for adapted operations ...
     """
 
     def __init__(
@@ -76,6 +77,7 @@ class IBKRClient:
 
         self._host = self._config.ibkr_gateway_host
         self._ib = IB()
+        self._broker = IBInsyncBrokerAdapter(self._ib)
         self._connected = False
         self._connection_time: Optional[datetime] = None
 
@@ -83,6 +85,11 @@ class IBKRClient:
     def ib(self) -> IB:
         """Access to the underlying ib_insync.IB instance."""
         return self._ib
+
+    @property
+    def broker(self) -> BrokerAdapter:
+        """Access to the current broker adapter."""
+        return self._broker
 
     @property
     def is_connected(self) -> bool:
@@ -119,7 +126,7 @@ class IBKRClient:
         """List of managed accounts (empty if not connected)."""
         if not self.is_connected:
             return []
-        return self._ib.managedAccounts() or []
+        return self._broker.managed_accounts()
 
     def connect(self, timeout: int = 10, readonly: bool = False) -> None:
         """
@@ -169,8 +176,8 @@ class IBKRClient:
             self._connection_time = datetime.now()
 
             # Log success with account info
-            accounts = self._ib.managedAccounts()
-            server_time = self._ib.reqCurrentTime()
+            accounts = self._broker.managed_accounts()
+            server_time = self._broker.request_current_time()
 
             elapsed_ms = (time.time() - start_time) * 1000
 
@@ -300,13 +307,13 @@ class IBKRClient:
             raise ConnectionError("Not connected to IBKR")
 
         if timeout_s is None:
-            return self._ib.reqCurrentTime()
+            return self._broker.request_current_time()
 
         loop = asyncio.get_event_loop()
 
         async def _get_time():
             return await asyncio.wait_for(
-                self._ib.reqCurrentTimeAsync(),
+                self._broker.request_current_time_async(),
                 timeout=timeout_s,
             )
 
