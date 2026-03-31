@@ -23,6 +23,7 @@ def _ensure_event_loop() -> None:
 _ensure_event_loop()
 
 if TYPE_CHECKING:
+    from ibkr_core.broker import BrokerAdapter, IBInsyncBrokerAdapter, get_broker_adapter
     from ibkr_core.client import ConnectionError, IBKRClient, create_client
     from ibkr_core.config import (
         Config,
@@ -82,6 +83,10 @@ __all__ = [
     "get_config",
     "load_config",
     "reset_config",
+    # Broker
+    "BrokerAdapter",
+    "IBInsyncBrokerAdapter",
+    "get_broker_adapter",
     # Client
     "IBKRClient",
     "ConnectionError",
@@ -134,6 +139,10 @@ _LAZY_ATTRS = {
     "get_config": "ibkr_core.config",
     "load_config": "ibkr_core.config",
     "reset_config": "ibkr_core.config",
+    # Broker
+    "BrokerAdapter": "ibkr_core.broker",
+    "IBInsyncBrokerAdapter": "ibkr_core.broker",
+    "get_broker_adapter": "ibkr_core.broker",
     # Client
     "IBKRClient": "ibkr_core.client",
     "ConnectionError": "ibkr_core.client",

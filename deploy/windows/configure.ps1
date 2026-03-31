@@ -404,7 +404,7 @@ if (-not (Test-Path $venvPath)) {
     }
 
     if ($pythonInstalls.Count -eq 0) {
-        Write-Host "ERROR: No Python installations found. Please install Python 3.10+ and re-run configure." -ForegroundColor Red
+        Write-Host "ERROR: No Python installations found. Please install Python 3.11+ and re-run configure." -ForegroundColor Red
     } else {
         $selectedPython = $null
         if ($pythonInstalls.Count -eq 1) {

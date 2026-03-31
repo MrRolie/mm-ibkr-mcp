@@ -19,6 +19,7 @@ from typing import Dict, List, Optional
 
 from ib_insync import LimitOrder, MarketOrder, Order, StopLimitOrder, StopOrder, Trade
 
+from ibkr_core.broker import get_broker_adapter
 from ibkr_core.client import IBKRClient
 from ibkr_core.config import get_config
 from ibkr_core.contracts import resolve_contract
@@ -1008,6 +1009,7 @@ def place_order(
 
     # If we reach here, orders are enabled - proceed with placement
     client.ensure_connected()
+    broker = get_broker_adapter(client)
 
     try:
         if order_spec.clientOrderId:
@@ -1060,7 +1062,13 @@ def place_order(
         # Handle BRACKET orders specially (multiple linked orders)
         if order_spec.orderType.upper() == "BRACKET":
             return _place_bracket_order(
-                client, contract, order_spec, symbol, guard_warnings, wait_for_status_s
+                client,
+                contract,
+                order_spec,
+                symbol,
+                guard_warnings,
+                wait_for_status_s,
+                preview,
             )
 
         # Build the order for non-bracket types
@@ -1076,13 +1084,13 @@ def place_order(
         )
 
         # Place the order
-        trade = client.ib.placeOrder(contract, ib_order)
+        trade = broker.place_order(contract, ib_order)
 
         # Register in our registry
         order_id = _order_registry.register(trade, symbol, order_spec.clientOrderId)
 
         # Wait briefly for initial status
-        client.ib.sleep(wait_for_status_s)
+        broker.sleep(wait_for_status_s)
 
         # Get current status
         order_status = _trade_to_order_status(trade, order_id)
@@ -1172,6 +1180,7 @@ def _place_bracket_order(
     symbol: str,
     guard_warnings: List[str],
     wait_for_status_s: float,
+    preview: OrderPreview,
 ) -> OrderResult:
     """
     Place a bracket order (entry + take profit + stop loss).
@@ -1191,6 +1200,7 @@ def _place_bracket_order(
         OrderResult with orderIds list and orderRoles mapping.
     """
     logger.info(f"Placing BRACKET order for {symbol}")
+    broker = get_broker_adapter(client)
 
     # Build the 3 bracket orders
     bracket_orders = _build_bracket_orders(order_spec)
@@ -1207,10 +1217,10 @@ def _place_bracket_order(
         f"Placing entry order: {entry_order.action} {entry_order.totalQuantity} @ "
         f"LMT {entry_order.lmtPrice}"
     )
-    entry_trade = client.ib.placeOrder(contract, entry_order)
+    entry_trade = broker.place_order(contract, entry_order)
 
     # Brief wait to get the orderId
-    client.ib.sleep(0.5)
+    broker.sleep(0.5)
 
     # Get the parent orderId for child orders
     parent_id = entry_trade.order.orderId
@@ -1228,17 +1238,17 @@ def _place_bracket_order(
         f"Placing take profit order: {tp_order.action} {tp_order.totalQuantity} @ "
         f"LMT {tp_order.lmtPrice}"
     )
-    tp_trade = client.ib.placeOrder(contract, tp_order)
+    tp_trade = broker.place_order(contract, tp_order)
 
     # Place stop loss order
     sl_price = sl_order.stopPrice if hasattr(sl_order, "stopPrice") else sl_order.auxPrice
     logger.info(
         f"Placing stop loss order: {sl_order.action} {sl_order.totalQuantity} @ STP {sl_price}"
     )
-    sl_trade = client.ib.placeOrder(contract, sl_order)
+    sl_trade = broker.place_order(contract, sl_order)
 
     # Wait for status updates
-    client.ib.sleep(wait_for_status_s)
+    broker.sleep(wait_for_status_s)
 
     # Register all orders in our registry
     entry_id = _order_registry.register(entry_trade, f"{symbol}_entry", order_spec.clientOrderId)
@@ -1267,6 +1277,65 @@ def _place_bracket_order(
         f"Bracket order placed: entry={entry_id}, tp={tp_id}, sl={sl_id}, "
         f"status={entry_status.status}"
     )
+
+    try:
+        config = get_config()
+        config_snapshot = {
+            "trading_mode": config.trading_mode,
+            "orders_enabled": config.orders_enabled,
+        }
+        account_id = (
+            order_spec.accountId
+            or client.managed_accounts[0]
+            if client.managed_accounts
+            else "UNKNOWN"
+        )
+
+        bracket_trades = [
+            ("entry", entry_id, entry_trade),
+            ("take_profit", tp_id, tp_trade),
+            ("stop_loss", sl_id, sl_trade),
+        ]
+        for role, leg_order_id, leg_trade in bracket_trades:
+            leg_status = _trade_to_order_status(leg_trade, leg_order_id)
+            save_order(
+                order_id=leg_order_id,
+                account_id=account_id,
+                symbol=symbol,
+                side=leg_trade.order.action,
+                quantity=float(leg_trade.order.totalQuantity),
+                order_type=leg_trade.order.orderType,
+                status=leg_status.status,
+                ibkr_order_id=str(leg_trade.order.orderId) if leg_trade.order.orderId else None,
+                preview_data=preview.model_dump() if role == "entry" else None,
+                config_snapshot=config_snapshot,
+                strategy_id=order_spec.strategyId,
+                virtual_subaccount_id=order_spec.virtualSubaccountId,
+            )
+
+        record_audit_event(
+            event_type="ORDER_SUBMIT",
+            event_data={
+                "order_id": entry_id,
+                "ibkr_order_id": str(entry_trade.order.orderId) if entry_trade.order.orderId else None,
+                "symbol": symbol,
+                "side": order_spec.side,
+                "quantity": order_spec.quantity,
+                "order_type": order_spec.orderType,
+                "status": entry_status.status,
+                "result_status": result_status,
+                "strategy_id": order_spec.strategyId,
+                "virtual_subaccount_id": order_spec.virtualSubaccountId
+                or order_spec.strategyId,
+                "order_ids": all_order_ids,
+                "order_roles": order_roles,
+            },
+            account_id=account_id,
+            strategy_id=order_spec.strategyId,
+            virtual_subaccount_id=order_spec.virtualSubaccountId,
+        )
+    except Exception as e:
+        logger.warning(f"Failed to record bracket order placement in audit: {e}")
 
     return OrderResult(
         orderId=entry_id,
@@ -1302,6 +1371,7 @@ def cancel_order(
     logger.info(f"Cancel request for order {order_id}")
 
     client.ensure_connected()
+    broker = get_broker_adapter(client)
 
     # Look up trade in our registry
     trade = _order_registry.lookup(order_id)
@@ -1338,10 +1408,10 @@ def cancel_order(
 
     try:
         # Cancel the order
-        client.ib.cancelOrder(trade.order)
+        broker.cancel_order(trade.order)
 
         # Wait for cancellation
-        client.ib.sleep(wait_for_cancel_s)
+        broker.sleep(wait_for_cancel_s)
 
         # Check final status
         final_status = trade.orderStatus.status if trade.orderStatus else "Unknown"
@@ -1400,9 +1470,10 @@ def get_order_status(
     logger.debug(f"Getting status for order {order_id}")
 
     client.ensure_connected()
+    broker = get_broker_adapter(client)
 
     # Allow event loop to process updates
-    client.ib.sleep(0.1)
+    broker.sleep(0.1)
 
     # Look up trade in our registry
     trade = _order_registry.lookup(order_id)
@@ -1428,15 +1499,17 @@ def _find_trade_in_ibkr(client: IBKRClient, order_id: str) -> Optional[Trade]:
     Returns:
         Trade if found, None otherwise
     """
+    broker = get_broker_adapter(client)
+
     # Check open trades first
-    for trade in client.ib.openTrades():
+    for trade in broker.open_trades():
         perm_id = str(trade.order.permId) if trade.order.permId else ""
         ord_id = str(trade.order.orderId) if trade.order.orderId else ""
         if order_id == perm_id or order_id == ord_id or order_id == f"ord_{ord_id}":
             return trade
 
     # Check all trades (includes completed)
-    for trade in client.ib.trades():
+    for trade in broker.trades():
         perm_id = str(trade.order.permId) if trade.order.permId else ""
         ord_id = str(trade.order.orderId) if trade.order.orderId else ""
         if order_id == perm_id or order_id == ord_id or order_id == f"ord_{ord_id}":
@@ -1447,11 +1520,13 @@ def _find_trade_in_ibkr(client: IBKRClient, order_id: str) -> Optional[Trade]:
 
 def _find_trade_by_client_order_id(client: IBKRClient, client_order_id: str) -> Optional[Trade]:
     """Search IBKR trades for a matching orderRef."""
-    for trade in client.ib.openTrades():
+    broker = get_broker_adapter(client)
+
+    for trade in broker.open_trades():
         if getattr(trade.order, "orderRef", None) == client_order_id:
             return trade
 
-    for trade in client.ib.trades():
+    for trade in broker.trades():
         if getattr(trade.order, "orderRef", None) == client_order_id:
             return trade
 
@@ -1469,10 +1544,11 @@ def get_open_orders(client: IBKRClient) -> List[Dict]:
         List of order metadata dicts.
     """
     client.ensure_connected()
-    client.ib.sleep(0.1)
+    broker = get_broker_adapter(client)
+    broker.sleep(0.1)
 
     orders = []
-    for trade in client.ib.openTrades():
+    for trade in broker.open_trades():
         perm_id = str(trade.order.permId) if trade.order.permId else None
         order_id = perm_id or f"ord_{trade.order.orderId}"
 
@@ -1609,7 +1685,8 @@ def get_order_set_status(
     logger.debug(f"Getting status for order set: {order_ids}")
 
     client.ensure_connected()
-    client.ib.sleep(0.1)
+    broker = get_broker_adapter(client)
+    broker.sleep(0.1)
 
     statuses = []
     not_found = []

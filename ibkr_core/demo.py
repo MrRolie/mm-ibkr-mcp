@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import Optional
 
 from ibkr_core.account import AccountError, get_account_summary, get_positions
+from ibkr_core.broker import get_broker_adapter
 from ibkr_core.client import ConnectionError, IBKRClient, create_client
 from ibkr_core.config import InvalidConfigError, get_config
 from ibkr_core.market_data import (
@@ -112,12 +113,18 @@ def check_gateway_connection(client: Optional[IBKRClient] = None) -> bool:
             client = create_client(mode="paper")
 
         # Connection test is implicit in create_client
-        server_time = client.ib.reqCurrentTime()
+        broker = get_broker_adapter(client)
+        server_time = broker.request_current_time()
+        server_dt = (
+            server_time
+            if isinstance(server_time, datetime)
+            else datetime.fromtimestamp(server_time)
+        )
         print_success("Connected to IBKR Gateway")
-        print_info("Server Time", str(datetime.fromtimestamp(server_time)))
+        print_info("Server Time", str(server_dt))
 
         # Get managed accounts
-        accounts = client.ib.managedAccounts()
+        accounts = broker.managed_accounts()
         if accounts:
             print_info("Managed Accounts", ", ".join(accounts))
 

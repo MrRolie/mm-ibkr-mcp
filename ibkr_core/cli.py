@@ -25,6 +25,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from ibkr_core import demo as demo_module
+from ibkr_core.broker import get_broker_adapter
 from ibkr_core.client import ConnectionError, create_client
 from ibkr_core.config import InvalidConfigError, get_config, reset_config
 
@@ -157,13 +158,18 @@ def healthcheck(
         console.print("[yellow]Connecting to IBKR Gateway...[/yellow]")
 
         client = create_client(mode=mode)
+        broker = get_broker_adapter(client)
 
         # Get server time
-        server_time = client.ib.reqCurrentTime()
-        server_dt = datetime.fromtimestamp(server_time)
+        server_time = broker.request_current_time()
+        server_dt = (
+            server_time
+            if isinstance(server_time, datetime)
+            else datetime.fromtimestamp(server_time)
+        )
 
         # Get managed accounts
-        accounts = client.ib.managedAccounts()
+        accounts = broker.managed_accounts()
 
         # Success!
         console.print("[green]✓ Connected successfully![/green]\n")

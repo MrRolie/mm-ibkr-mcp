@@ -91,6 +91,8 @@ Shared settings:
 
 - Run both sessions concurrently so live strategies can remain active while new strategies are tested in paper.
 - Use separate live and paper usernames. IBKR supports simultaneous live and paper sessions when they use different credentials and different ports.
+- Even with separate live and paper logins, both lanes can still share the same underlying market-data entitlement set. In that mode IBKR only serves one market-data session at a time, live takes precedence, and paper quote requests can fail with error `10197` while live is active.
+- `mm-trading` compensates for that shared-entitlement case with a paper-only Yahoo Finance fallback for `STK` quote and preview flows. The gateway itself remains IBKR-only and should still be treated as the authoritative live market-data path.
 - `mm-trading` and local tools connect directly to `127.0.0.1:4001` or `127.0.0.1:4002`.
 
 ## Management Commands

@@ -13,6 +13,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
+from ibkr_core.broker import get_broker_adapter
 from ibkr_core.client import IBKRClient
 from ibkr_core.models import AccountPnl, AccountSummary, PnlDetail, Position
 
@@ -103,6 +104,7 @@ def get_account_summary(
         AccountSummaryError: If summary retrieval fails.
     """
     client.ensure_connected()
+    broker = get_broker_adapter(client)
 
     # Determine account ID
     if account_id is None:
@@ -110,10 +112,10 @@ def get_account_summary(
 
     logger.info(f"Requesting account summary for {account_id}")
 
-    previous_timeout = getattr(client.ib, "RequestTimeout", None)
+    previous_timeout = broker.get_request_timeout()
     if previous_timeout is not None:
         try:
-            client.ib.RequestTimeout = max(1.0, min(float(previous_timeout), float(timeout_s)))
+            broker.set_request_timeout(max(1.0, min(float(previous_timeout), float(timeout_s))))
         except Exception:
             previous_timeout = None
 
@@ -121,7 +123,7 @@ def get_account_summary(
         # accountSummary() loads and caches subscription data on first call.
         # Repeated reqAccountSummary() calls can leak subscriptions and trigger
         # IBKR error 322 (max account summary requests exceeded).
-        summary_values = client.ib.accountSummary(account_id)
+        summary_values = broker.account_summary(account_id)
 
         if not summary_values:
             raise AccountSummaryError(f"No account summary data received for account {account_id}")
@@ -181,7 +183,7 @@ def get_account_summary(
     finally:
         if previous_timeout is not None:
             try:
-                client.ib.RequestTimeout = previous_timeout
+                broker.set_request_timeout(previous_timeout)
             except Exception:
                 pass
 
@@ -226,6 +228,7 @@ def get_positions(
         AccountPositionsError: If positions retrieval fails.
     """
     client.ensure_connected()
+    broker = get_broker_adapter(client)
 
     # Determine account ID for filtering
     target_account = account_id
@@ -236,13 +239,13 @@ def get_positions(
 
     try:
         # Request positions from IBKR
-        client.ib.reqPositions()
+        broker.request_positions()
 
         # Allow time for data to arrive
-        client.ib.sleep(min(timeout_s, 2.0))
+        broker.sleep(min(timeout_s, 2.0))
 
         # Get all positions
-        raw_positions = client.ib.positions()
+        raw_positions = broker.positions()
 
         # Filter by account
         positions: List[Position] = []
@@ -264,7 +267,7 @@ def get_positions(
 
             # Get market values from portfolio items if available
             # The positions() call gives us basic info; for market values we need portfolio()
-            portfolio_items = client.ib.portfolio(pos.account)
+            portfolio_items = broker.portfolio(pos.account)
 
             # Find matching portfolio item for market values
             market_price = 0.0
@@ -306,7 +309,7 @@ def get_positions(
     finally:
         # Cancel positions subscription
         try:
-            client.ib.cancelPositions()
+            broker.cancel_positions()
         except Exception:
             pass
 
@@ -342,6 +345,7 @@ def get_pnl(
         AccountPnlError: If P&L retrieval fails.
     """
     client.ensure_connected()
+    broker = get_broker_adapter(client)
 
     # Determine account ID
     target_account = account_id
@@ -358,13 +362,13 @@ def get_pnl(
     try:
         # Request PnL from IBKR
         # reqPnL subscribes to P&L updates
-        client.ib.reqPnL(target_account)
+        broker.request_pnl(target_account)
 
         # Allow time for data to arrive
-        client.ib.sleep(min(timeout_s, 2.0))
+        broker.sleep(min(timeout_s, 2.0))
 
         # Get account PnL
-        pnl_data = client.ib.pnl(target_account)
+        pnl_data = broker.pnl(target_account)
 
         # Get per-symbol PnL from positions/portfolio
         positions = get_positions(client, target_account, timeout_s)
@@ -438,7 +442,7 @@ def get_pnl(
     finally:
         # Cancel PnL subscription
         try:
-            client.ib.cancelPnL(target_account)
+            broker.cancel_pnl(target_account)
         except Exception:
             pass
 

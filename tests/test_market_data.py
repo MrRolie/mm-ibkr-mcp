@@ -346,6 +346,91 @@ class MockErrorEvent:
         return self
 
 
+class FakeBroker:
+    """Minimal explicit broker fake for seam-focused tests."""
+
+    def __init__(self):
+        self.error_handlers = []
+        self.market_data_return_value = None
+        self.historical_data_return_value = []
+        self.place_order_return_value = None
+        self.open_trades_return_value = []
+        self.trades_return_value = []
+        self.market_data_requests = []
+        self.cancel_market_data_requests = []
+        self.historical_requests = []
+        self.place_order_requests = []
+        self.cancel_order_requests = []
+        self.sleep_calls = []
+        self.sleep_hook = None
+
+    def add_error_handler(self, handler):
+        self.error_handlers.append(handler)
+
+    def remove_error_handler(self, handler):
+        if handler in self.error_handlers:
+            self.error_handlers.remove(handler)
+
+    def request_market_data(self, contract, generic_tick_list="", *, snapshot=False):
+        self.market_data_requests.append((contract, generic_tick_list, snapshot))
+        return self.market_data_return_value
+
+    def cancel_market_data(self, contract):
+        self.cancel_market_data_requests.append(contract)
+
+    def request_historical_data(
+        self,
+        contract,
+        *,
+        end_date_time,
+        duration_str,
+        bar_size_setting,
+        what_to_show,
+        use_rth,
+        format_date,
+        timeout,
+    ):
+        self.historical_requests.append(
+            {
+                "contract": contract,
+                "end_date_time": end_date_time,
+                "duration_str": duration_str,
+                "bar_size_setting": bar_size_setting,
+                "what_to_show": what_to_show,
+                "use_rth": use_rth,
+                "format_date": format_date,
+                "timeout": timeout,
+            }
+        )
+        return self.historical_data_return_value
+
+    def place_order(self, contract, order):
+        self.place_order_requests.append((contract, order))
+        return self.place_order_return_value
+
+    def cancel_order(self, order):
+        self.cancel_order_requests.append(order)
+
+    def open_trades(self):
+        return list(self.open_trades_return_value)
+
+    def trades(self):
+        return list(self.trades_return_value)
+
+    def sleep(self, seconds):
+        self.sleep_calls.append(seconds)
+        if self.sleep_hook is not None:
+            self.sleep_hook(seconds)
+
+
+def make_explicit_broker_client(broker):
+    client = MagicMock()
+    client.broker = broker
+    client.is_connected = True
+    client.ensure_connected = MagicMock()
+    return client
+
+
 class TestGetQuoteMocked:
     """Test get_quote with mocked IBKR."""
 
@@ -458,6 +543,34 @@ class TestGetQuoteMocked:
         with patch("ibkr_core.market_data.resolve_contract", return_value=mock_contract):
             with pytest.raises(MarketDataPermissionError, match="10089"):
                 get_quote(spec, mock_client, timeout_s=0.5)
+
+    def test_get_quote_uses_explicit_broker(self):
+        """Test quote retrieval through an explicit broker adapter."""
+        broker = FakeBroker()
+        client = make_explicit_broker_client(broker)
+
+        mock_contract = MagicMock()
+        mock_contract.conId = 265598
+
+        mock_ticker = MagicMock()
+        mock_ticker.bid = 150.00
+        mock_ticker.ask = 150.05
+        mock_ticker.last = 150.02
+        mock_ticker.bidSize = 100
+        mock_ticker.askSize = 200
+        mock_ticker.lastSize = 50
+        mock_ticker.volume = 1000000
+        broker.market_data_return_value = mock_ticker
+
+        spec = SymbolSpec(symbol="AAPL", securityType="STK")
+
+        with patch("ibkr_core.market_data.resolve_contract", return_value=mock_contract):
+            quote = get_quote(spec, client, timeout_s=1.0)
+
+        assert quote.symbol == "AAPL"
+        assert broker.market_data_requests == [(mock_contract, "", True)]
+        assert broker.cancel_market_data_requests == [mock_contract]
+        assert broker.error_handlers == []
 
 
 class TestGetQuotesMocked:
@@ -649,6 +762,40 @@ class TestGetHistoricalBarsMocked:
                 what_to_show="INVALID",
             )
 
+    def test_get_historical_bars_uses_explicit_broker(self):
+        """Test historical bars retrieval through an explicit broker adapter."""
+        broker = FakeBroker()
+        client = make_explicit_broker_client(broker)
+
+        mock_contract = MagicMock()
+        mock_contract.conId = 265598
+
+        mock_bar = MagicMock()
+        mock_bar.date = datetime(2024, 12, 10, 16, 0, 0, tzinfo=timezone.utc)
+        mock_bar.open = 150.0
+        mock_bar.high = 151.0
+        mock_bar.low = 149.0
+        mock_bar.close = 150.5
+        mock_bar.volume = 100000
+        broker.historical_data_return_value = [mock_bar]
+
+        spec = SymbolSpec(symbol="AAPL", securityType="STK")
+
+        with patch("ibkr_core.market_data.resolve_contract", return_value=mock_contract):
+            bars = get_historical_bars(
+                spec,
+                client,
+                bar_size="1d",
+                duration="5d",
+                what_to_show="TRADES",
+                timeout_s=5.0,
+            )
+
+        assert len(bars) == 1
+        assert bars[0].symbol == "AAPL"
+        assert broker.historical_requests[0]["contract"] is mock_contract
+        assert broker.error_handlers == []
+
 
 # =============================================================================
 # Unit Tests - Error Handling
@@ -703,11 +850,11 @@ class TestQuoteMode:
 class TestStreamingQuoteMocked:
     """Test StreamingQuote with mocked IBKR."""
 
-    def _setup_mock_error_event(self, mock_client):
-        """Helper to setup mock error event."""
-        mock_error_event = MockErrorEvent()
-        mock_client.ib.errorEvent = mock_error_event
-        return mock_error_event
+    @staticmethod
+    def _make_streaming_client():
+        broker = FakeBroker()
+        client = make_explicit_broker_client(broker)
+        return client, broker
 
     def test_streaming_quote_init(self):
         """Test StreamingQuote initialization."""
@@ -721,9 +868,7 @@ class TestStreamingQuoteMocked:
 
     def test_streaming_quote_start_success(self):
         """Test successful streaming start."""
-        mock_client = MagicMock()
-        mock_client.is_connected = True
-        mock_client.ensure_connected = MagicMock()
+        mock_client, broker = self._make_streaming_client()
 
         mock_contract = MagicMock()
         mock_contract.conId = 265598
@@ -737,10 +882,7 @@ class TestStreamingQuoteMocked:
         mock_ticker.lastSize = 50
         mock_ticker.volume = 1000000
 
-        mock_error_event = self._setup_mock_error_event(mock_client)
-        mock_client.ib.reqMktData.return_value = mock_ticker
-        mock_client.ib.sleep = MagicMock()
-        mock_client.ib.cancelMktData = MagicMock()
+        broker.market_data_return_value = mock_ticker
 
         spec = SymbolSpec(symbol="AAPL", securityType="STK")
 
@@ -757,12 +899,13 @@ class TestStreamingQuoteMocked:
 
             stream.stop()
             assert not stream.is_active
+            assert broker.market_data_requests == [(mock_contract, "", False)]
+            assert broker.cancel_market_data_requests == [mock_contract]
+            assert broker.error_handlers == []
 
     def test_streaming_quote_context_manager(self):
         """Test StreamingQuote as context manager."""
-        mock_client = MagicMock()
-        mock_client.is_connected = True
-        mock_client.ensure_connected = MagicMock()
+        mock_client, broker = self._make_streaming_client()
 
         mock_contract = MagicMock()
         mock_contract.conId = 265598
@@ -776,10 +919,7 @@ class TestStreamingQuoteMocked:
         mock_ticker.lastSize = 50
         mock_ticker.volume = 1000000
 
-        self._setup_mock_error_event(mock_client)
-        mock_client.ib.reqMktData.return_value = mock_ticker
-        mock_client.ib.sleep = MagicMock()
-        mock_client.ib.cancelMktData = MagicMock()
+        broker.market_data_return_value = mock_ticker
 
         spec = SymbolSpec(symbol="AAPL", securityType="STK")
 
@@ -791,12 +931,11 @@ class TestStreamingQuoteMocked:
 
             # After exiting context, should be stopped
             assert not stream.is_active
+            assert broker.cancel_market_data_requests == [mock_contract]
 
     def test_streaming_quote_updates_generator(self):
         """Test streaming quote updates generator."""
-        mock_client = MagicMock()
-        mock_client.is_connected = True
-        mock_client.ensure_connected = MagicMock()
+        mock_client, broker = self._make_streaming_client()
 
         mock_contract = MagicMock()
         mock_contract.conId = 265598
@@ -823,15 +962,13 @@ class TestStreamingQuoteMocked:
                 mock_ticker.last = last
                 call_count[0] += 1
 
-        mock_client.ib.sleep = mock_sleep
+        broker.sleep_hook = mock_sleep
         # Set initial values DIFFERENT from price_sequence to trigger changes
         mock_ticker.bid = 150.00
         mock_ticker.ask = 150.05
         mock_ticker.last = 150.02
 
-        self._setup_mock_error_event(mock_client)
-        mock_client.ib.reqMktData.return_value = mock_ticker
-        mock_client.ib.cancelMktData = MagicMock()
+        broker.market_data_return_value = mock_ticker
 
         spec = SymbolSpec(symbol="AAPL", securityType="STK")
 
@@ -843,12 +980,11 @@ class TestStreamingQuoteMocked:
                 for quote in updates:
                     assert quote.symbol == "AAPL"
                     assert quote.source == "IBKR_STREAMING"
+            assert broker.cancel_market_data_requests == [mock_contract]
 
     def test_streaming_quote_timeout(self):
         """Test streaming quote timeout."""
-        mock_client = MagicMock()
-        mock_client.is_connected = True
-        mock_client.ensure_connected = MagicMock()
+        mock_client, broker = self._make_streaming_client()
 
         mock_contract = MagicMock()
         mock_contract.conId = 265598
@@ -859,10 +995,7 @@ class TestStreamingQuoteMocked:
         mock_ticker.ask = float("nan")
         mock_ticker.last = float("nan")
 
-        self._setup_mock_error_event(mock_client)
-        mock_client.ib.reqMktData.return_value = mock_ticker
-        mock_client.ib.sleep = MagicMock()
-        mock_client.ib.cancelMktData = MagicMock()
+        broker.market_data_return_value = mock_ticker
 
         spec = SymbolSpec(symbol="AAPL", securityType="STK")
 
@@ -870,6 +1003,7 @@ class TestStreamingQuoteMocked:
             stream = StreamingQuote(spec, mock_client, timeout_s=0.1)
             with pytest.raises(MarketDataTimeoutError):
                 stream.start()
+        assert broker.cancel_market_data_requests == [mock_contract]
 
     def test_get_current_without_start_raises(self):
         """Test get_current raises when not started."""
@@ -923,9 +1057,8 @@ class TestGetQuoteWithModeMocked:
 
     def test_streaming_mode(self):
         """Test streaming mode."""
-        mock_client = MagicMock()
-        mock_client.is_connected = True
-        mock_client.ensure_connected = MagicMock()
+        broker = FakeBroker()
+        mock_client = make_explicit_broker_client(broker)
 
         mock_contract = MagicMock()
         mock_contract.conId = 265598
@@ -939,10 +1072,7 @@ class TestGetQuoteWithModeMocked:
         mock_ticker.lastSize = 50
         mock_ticker.volume = 1000000
 
-        self._setup_mock_error_event(mock_client)
-        mock_client.ib.reqMktData.return_value = mock_ticker
-        mock_client.ib.sleep = MagicMock()
-        mock_client.ib.cancelMktData = MagicMock()
+        broker.market_data_return_value = mock_ticker
 
         spec = SymbolSpec(symbol="AAPL", securityType="STK")
 
@@ -951,6 +1081,7 @@ class TestGetQuoteWithModeMocked:
 
         assert quote.symbol == "AAPL"
         assert quote.source == "IBKR_STREAMING"
+        assert broker.cancel_market_data_requests == [mock_contract]
 
 
 class TestGetStreamingQuote:

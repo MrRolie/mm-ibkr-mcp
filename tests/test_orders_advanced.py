@@ -36,6 +36,7 @@ from ibkr_core.orders import (
     _get_opposite_side,
     cancel_order_set,
     get_order_set_status,
+    place_order,
     validate_order_spec,
 )
 
@@ -470,6 +471,84 @@ class TestBracketOrderBuilding:
         )
         with pytest.raises(OrderValidationError):
             _build_bracket_orders(order_spec)
+
+    def test_place_bracket_order_persists_and_audits_all_legs(self, valid_symbol_spec):
+        """Bracket placement should persist each leg and emit one submit audit event."""
+        order_spec = OrderSpec(
+            instrument=valid_symbol_spec,
+            side="BUY",
+            quantity=2,
+            orderType="BRACKET",
+            limitPrice=195.0,
+            takeProfitPrice=205.0,
+            stopLossPrice=190.0,
+            tif="DAY",
+            clientOrderId="bracket-123",
+            strategyId="deploy_verify",
+        )
+
+        mock_client = MagicMock()
+        mock_client.ensure_connected = MagicMock()
+        mock_client.managed_accounts = ["DU123456"]
+        mock_client.ib = MagicMock()
+        mock_client.ib.sleep = MagicMock()
+
+        contract = MagicMock()
+        contract.conId = 101
+        contract.symbol = "AAPL"
+
+        def _trade(order_id: int, order_type: str, status: str = "Submitted"):
+            trade = MagicMock()
+            trade.order.orderId = order_id
+            trade.order.permId = 900000 + order_id
+            trade.order.clientId = 1
+            trade.order.action = "BUY" if order_id == 1 else "SELL"
+            trade.order.totalQuantity = 2
+            trade.order.orderType = order_type
+            trade.contract = contract
+            trade.orderStatus = MagicMock()
+            trade.orderStatus.status = status
+            trade.orderStatus.filled = 0
+            trade.orderStatus.remaining = 2
+            trade.orderStatus.avgFillPrice = 0
+            trade.log = []
+            return trade
+
+        entry_trade = _trade(1, "LMT")
+        tp_trade = _trade(2, "LMT")
+        sl_trade = _trade(3, "STP")
+        mock_client.ib.placeOrder.side_effect = [entry_trade, tp_trade, sl_trade]
+
+        mock_quote = MagicMock()
+        mock_quote.bid = 194.5
+        mock_quote.ask = 195.5
+        mock_quote.last = 195.0
+
+        with patch("ibkr_core.orders.get_config") as mock_get_config:
+            mock_get_config.return_value = MagicMock(
+                orders_enabled=True,
+                trading_mode="paper",
+            )
+            with patch("ibkr_core.orders.resolve_contract", return_value=contract):
+                with patch("ibkr_core.orders.get_quote", return_value=mock_quote):
+                    with patch("ibkr_core.orders.save_order") as mock_save_order:
+                        with patch("ibkr_core.orders.record_audit_event") as mock_record_audit:
+                            result = place_order(mock_client, order_spec)
+
+        assert result.status == "ACCEPTED"
+        assert len(result.orderIds) == 3
+        assert result.orderRoles["entry"] == result.orderId
+        assert mock_save_order.call_count == 3
+
+        submit_calls = [
+            call.kwargs
+            for call in mock_record_audit.call_args_list
+            if call.kwargs.get("event_type") == "ORDER_SUBMIT"
+        ]
+        assert len(submit_calls) == 1
+        submit_event = submit_calls[0]["event_data"]
+        assert submit_event["order_ids"] == result.orderIds
+        assert submit_event["order_roles"] == result.orderRoles
 
 
 # =============================================================================

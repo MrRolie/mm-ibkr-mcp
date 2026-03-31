@@ -5,10 +5,20 @@ Verifies that the API works correctly when using the simulated
 IBKR client, allowing full integration testing without a live gateway.
 """
 
-from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
+from ibkr_core.contracts import get_contract_cache
+from ibkr_core.market_data import (
+    get_historical_bars,
+    get_option_chain,
+    get_option_snapshot,
+    get_quote as get_core_quote,
+)
+from ibkr_core.models import OrderSpec, SymbolSpec
+from ibkr_core import orders as orders_core
 from ibkr_core.simulation import SimulatedIBKRClient, SimulatedQuote
 
 
@@ -190,6 +200,119 @@ class TestSimulatedIBInterface:
     def test_ib_disconnect(self, client):
         client.ib.disconnect()
         assert client.ib.isConnected() is False
+
+
+class TestSimulationCoreAdapterFlows:
+    """Tests for the refactored core paths against the simulation broker adapter."""
+
+    @pytest.fixture(autouse=True)
+    def clear_contract_cache(self):
+        cache = get_contract_cache()
+        cache.clear()
+        yield
+        cache.clear()
+
+    @pytest.fixture
+    def client(self):
+        client = SimulatedIBKRClient()
+        client.connect()
+        yield client
+        client.disconnect()
+
+    def test_core_quote_and_history_use_simulation_broker(self, client):
+        spec = SymbolSpec(symbol="AAPL", securityType="STK")
+
+        quote = get_core_quote(spec, client, timeout_s=0.5)
+        bars = get_historical_bars(spec, client, bar_size="1d", duration="5d", timeout_s=0.5)
+
+        assert quote.symbol == "AAPL"
+        assert quote.bid > 0
+        assert quote.ask >= quote.bid
+        assert len(bars) >= 5
+        assert all(bar.symbol == "AAPL" for bar in bars)
+
+    def test_core_historical_month_bars_use_month_spacing(self, client):
+        spec = SymbolSpec(symbol="AAPL", securityType="STK")
+
+        bars = get_historical_bars(spec, client, bar_size="1mo", duration="3mo", timeout_s=0.5)
+
+        assert len(bars) >= 5
+        assert all(bar.barSize == "1 month" for bar in bars)
+        assert (bars[1].time - bars[0].time).days >= 28
+
+    def test_core_historical_second_durations_do_not_expand_to_minutes(self, client):
+        spec = SymbolSpec(symbol="AAPL", securityType="STK")
+
+        bars = get_historical_bars(spec, client, bar_size="1m", duration="300s", timeout_s=0.5)
+
+        assert len(bars) == 5
+        assert all(bar.barSize == "1 min" for bar in bars)
+
+    def test_core_option_chain_and_snapshot_use_simulation_broker(self, client):
+        underlying = SymbolSpec(symbol="AAPL", securityType="STK")
+
+        chain = get_option_chain(
+            underlying,
+            client,
+            strike_count=3,
+            max_candidates=4,
+            timeout_s=0.5,
+        )
+        assert chain.candidateCount > 0
+
+        candidate = chain.candidates[0]
+        snapshot = get_option_snapshot(
+            SymbolSpec(
+                symbol=candidate.symbol,
+                securityType="OPT",
+                exchange=candidate.exchange,
+                currency=candidate.currency,
+                expiry=candidate.expiry,
+                strike=candidate.strike,
+                right=candidate.right,
+                multiplier=candidate.multiplier,
+            ),
+            client,
+            timeout_s=0.5,
+        )
+
+        assert snapshot.contract.securityType == "OPT"
+        assert snapshot.greeks.model is not None
+        assert snapshot.impliedVolatility is not None
+
+    def test_core_place_retry_and_cancel_use_simulation_broker(self, client):
+        order_spec = OrderSpec(
+            instrument=SymbolSpec(symbol="AAPL", securityType="STK"),
+            side="BUY",
+            quantity=1,
+            orderType="LMT",
+            limitPrice=1.0,
+            clientOrderId="sim-core-limit-1",
+        )
+
+        with (
+            patch.object(
+                orders_core,
+                "get_config",
+                return_value=SimpleNamespace(orders_enabled=True, trading_mode="simulation"),
+            ),
+            patch.object(orders_core, "save_order"),
+            patch.object(orders_core, "record_audit_event"),
+            patch.object(orders_core, "update_order_status"),
+            patch.object(orders_core, "_order_registry", orders_core.OrderRegistry()),
+        ):
+            first = orders_core.place_order(client, order_spec, wait_for_status_s=0.0)
+            retry = orders_core.place_order(client, order_spec, wait_for_status_s=0.0)
+            open_orders = orders_core.get_open_orders(client)
+            cancelled = orders_core.cancel_order(client, first.orderId, wait_for_cancel_s=0.0)
+
+        assert first.status == "ACCEPTED"
+        assert first.orderStatus is not None
+        assert first.orderStatus.status == "SUBMITTED"
+        assert retry.orderId == first.orderId
+        assert len(open_orders) == 1
+        assert open_orders[0]["client_order_id"] == "sim-core-limit-1"
+        assert cancelled.status == "CANCELLED"
 
 
 class TestSimulationMetrics:
