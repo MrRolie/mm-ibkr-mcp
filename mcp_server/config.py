@@ -73,6 +73,16 @@ class MCPConfig:
     log_level: str = "INFO"
     json_response: bool = False
     stateless_http: bool = False
+    # Telegram human-in-the-loop settings
+    telegram_bot_token: Optional[str] = None
+    telegram_chat_id: Optional[str] = None
+    telegram_approval_timeout_seconds: int = 300
+    telegram_live_unlock_timeout_seconds: int = 120
+    # If True, live trades require a valid approval_id from ibkr_request_trade_approval.
+    enforce_trade_approval: bool = False
+    # Agent profile directory and default profile ID.
+    agent_profile_dir: Optional[str] = None
+    agent_profile_id: str = "default"
 
     def __post_init__(self) -> None:
         if self.transport not in {"stdio", "sse", "streamable-http"}:
@@ -92,6 +102,11 @@ class MCPConfig:
             raise ValueError(
                 "MCP_AUTH_TOKEN is required when MCP_TRANSPORT is 'sse' or 'streamable-http'"
             )
+
+    @property
+    def telegram_enabled(self) -> bool:
+        """Whether Telegram is configured."""
+        return bool(self.telegram_bot_token and self.telegram_chat_id)
 
     @property
     def is_http_transport(self) -> bool:
@@ -155,4 +170,15 @@ def get_mcp_config() -> MCPConfig:
         log_level=os.environ.get("MCP_LOG_LEVEL", "INFO"),
         json_response=_parse_bool(os.environ.get("MCP_JSON_RESPONSE")),
         stateless_http=_parse_bool(os.environ.get("MCP_STATELESS_HTTP")),
+        telegram_bot_token=os.environ.get("TELEGRAM_BOT_TOKEN") or None,
+        telegram_chat_id=os.environ.get("TELEGRAM_CHAT_ID") or None,
+        telegram_approval_timeout_seconds=_parse_int(
+            os.environ.get("TELEGRAM_APPROVAL_TIMEOUT_SECONDS"), 300
+        ),
+        telegram_live_unlock_timeout_seconds=_parse_int(
+            os.environ.get("TELEGRAM_LIVE_UNLOCK_TIMEOUT_SECONDS"), 120
+        ),
+        enforce_trade_approval=_parse_bool(os.environ.get("MCP_ENFORCE_TRADE_APPROVAL")),
+        agent_profile_dir=os.environ.get("MCP_AGENT_PROFILE_DIR") or None,
+        agent_profile_id=os.environ.get("MCP_AGENT_PROFILE_ID", "default").strip(),
     )

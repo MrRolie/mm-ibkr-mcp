@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -187,3 +187,224 @@ class TradingControlUpdateResponse(BaseModel):
     previousState: TradingStatusResponse = Field(..., description="State before the update.")
     currentState: TradingStatusResponse = Field(..., description="State after the update.")
     message: str = Field(..., description="Human-readable result message.")
+
+
+# ---------------------------------------------------------------------------
+# Telegram approval models
+# ---------------------------------------------------------------------------
+
+
+class ApprovalStatusResponse(BaseModel):
+    """Status of a human-in-the-loop approval request."""
+
+    approvalId: str = Field(..., description="Unique approval identifier.")
+    approvalType: str = Field(..., description="'trade' or 'live_trading'.")
+    status: str = Field(
+        ...,
+        description="Current status: pending | approved | denied | expired | used.",
+    )
+    requestedAt: str = Field(..., description="ISO 8601 timestamp when the request was created.")
+    expiresAt: str = Field(..., description="ISO 8601 timestamp when the request expires.")
+    resolvedAt: Optional[str] = Field(None, description="ISO 8601 timestamp of resolution.")
+    resolveNote: Optional[str] = Field(None, description="Who approved or denied.")
+    telegramMessageId: Optional[int] = Field(None, description="Telegram message ID if sent.")
+
+
+class NotifyResponse(BaseModel):
+    """Result of sending a Telegram notification."""
+
+    sent: bool = Field(..., description="Whether the message was sent successfully.")
+    telegramMessageId: Optional[int] = Field(None, description="Telegram message ID.")
+    message: str = Field(..., description="Human-readable result.")
+
+
+# ---------------------------------------------------------------------------
+# Risk and impact models
+# ---------------------------------------------------------------------------
+
+
+class OrderImpactResponse(BaseModel):
+    """Pre-trade order impact assessment."""
+
+    symbol: str = Field(..., description="Instrument symbol.")
+    side: str = Field(..., description="Order side: BUY or SELL.")
+    quantity: float = Field(..., description="Order quantity.")
+    estimatedPrice: Optional[float] = Field(None, description="Estimated execution price.")
+    estimatedNotional: Optional[float] = Field(None, description="Estimated order notional value.")
+    estimatedCommission: Optional[float] = Field(None, description="Estimated commission.")
+    existingPositionQty: float = Field(0.0, description="Current position quantity before this order.")
+    newPositionQty: float = Field(0.0, description="Projected position quantity after this order.")
+    concentrationBefore: Optional[float] = Field(
+        None, description="Current position as % of net liquidation."
+    )
+    concentrationAfter: Optional[float] = Field(
+        None, description="Projected position as % of net liquidation after order."
+    )
+    buyingPowerUsedPct: Optional[float] = Field(
+        None, description="Order notional as % of available buying power."
+    )
+    marginUtilisationPct: Optional[float] = Field(
+        None, description="Current maintenance margin as % of net liquidation."
+    )
+    estimatedMarginChange: Optional[float] = Field(
+        None, description="Estimated change in maintenance margin from preview."
+    )
+    maxLossEstimate: Optional[float] = Field(
+        None, description="Conservative max loss estimate for this position."
+    )
+    warnings: List[str] = Field(default_factory=list, description="Risk warnings.")
+
+
+class PortfolioRiskResponse(BaseModel):
+    """Portfolio-wide risk metrics."""
+
+    netLiquidation: float = Field(..., description="Net liquidation value.")
+    buyingPower: float = Field(..., description="Available buying power.")
+    maintenanceMargin: float = Field(..., description="Current maintenance margin requirement.")
+    initialMargin: float = Field(..., description="Current initial margin requirement.")
+    totalUnrealisedPnl: float = Field(..., description="Total unrealised P&L across positions.")
+    totalRealisedPnl: float = Field(..., description="Total realised P&L across positions.")
+    positionCount: int = Field(..., description="Number of open positions.")
+    concentrationBySymbol: Dict[str, float] = Field(
+        default_factory=dict,
+        description="Map of symbol → % of net liquidation by absolute market value.",
+    )
+    largestPositionSymbol: Optional[str] = Field(None, description="Symbol of the largest position.")
+    largestPositionPct: Optional[float] = Field(
+        None, description="Concentration % of the largest position."
+    )
+    marginUtilisationPct: Optional[float] = Field(
+        None, description="Maintenance margin as % of net liquidation."
+    )
+    buyingPowerUsedPct: Optional[float] = Field(
+        None, description="Approximate % of cash already committed."
+    )
+    riskLevel: str = Field(..., description="Overall risk level: low | medium | high | critical.")
+    warnings: List[str] = Field(default_factory=list, description="Risk warnings.")
+
+
+# ---------------------------------------------------------------------------
+# Position-limits check model
+# ---------------------------------------------------------------------------
+
+
+class PositionLimitsCheckResponse(BaseModel):
+    """Result of checking an order against position limits."""
+
+    passed: bool = Field(..., description="True if all limit checks passed.")
+    violations: List[str] = Field(default_factory=list, description="List of violated limits.")
+    profileId: str = Field(..., description="Profile used for the check.")
+
+
+# ---------------------------------------------------------------------------
+# Agent profile models
+# ---------------------------------------------------------------------------
+
+
+class AgentProfileResponse(BaseModel):
+    """An agent's trading profile / constraint set."""
+
+    profileId: str = Field(..., description="Profile identifier.")
+    description: Optional[str] = Field(None, description="Human-readable description.")
+    allowedSecurityTypes: Optional[List[str]] = Field(None, description="Permitted security types.")
+    allowedOrderTypes: Optional[List[str]] = Field(None, description="Permitted order types.")
+    allowedSymbols: Optional[List[str]] = Field(None, description="Symbol allowlist (null = all).")
+    blockedSymbols: List[str] = Field(default_factory=list, description="Blocked symbols.")
+    maxPositionSizePct: Optional[float] = Field(
+        None, description="Max position size as % of net liquidation."
+    )
+    maxPositionNotional: Optional[float] = Field(None, description="Max position notional in USD.")
+    maxOrderQuantity: Optional[float] = Field(None, description="Max quantity per order.")
+    maxDailyOrders: Optional[int] = Field(None, description="Max orders per day.")
+    maxDailyLoss: Optional[float] = Field(None, description="Daily loss limit (negative value).")
+    requireTradeApproval: bool = Field(
+        True, description="Whether Telegram approval is required before placing trades."
+    )
+    requireLiveTradingApproval: bool = Field(
+        True, description="Whether Telegram approval is required to unlock live trading."
+    )
+    allowOptions: bool = Field(True, description="Whether options trading is permitted.")
+    allowShortSelling: bool = Field(True, description="Whether short selling is permitted.")
+    notes: Optional[str] = Field(None, description="Human-readable notes.")
+    source: Optional[str] = Field(None, description="File path or 'builtin_default'.")
+
+
+class ProfileValidationResponse(BaseModel):
+    """Result of validating a proposed order against an agent profile."""
+
+    passed: bool = Field(..., description="True if the order satisfies all profile constraints.")
+    violations: List[str] = Field(default_factory=list, description="Constraint violations found.")
+    profileId: str = Field(..., description="Profile used for validation.")
+    symbol: str = Field(..., description="Symbol from the proposed order.")
+    side: str = Field(..., description="Side from the proposed order.")
+    quantity: float = Field(..., description="Quantity from the proposed order.")
+
+
+# ---------------------------------------------------------------------------
+# Session activity and audit log models
+# ---------------------------------------------------------------------------
+
+
+class SessionOrderSummary(BaseModel):
+    """Brief summary of a session order record."""
+
+    orderId: str = Field(..., description="Internal order identifier.")
+    symbol: str = Field(..., description="Instrument symbol.")
+    side: str = Field(..., description="BUY or SELL.")
+    quantity: float = Field(..., description="Order quantity.")
+    orderType: str = Field(..., description="Order type.")
+    status: str = Field(..., description="Current order status.")
+    placedAt: str = Field(..., description="ISO 8601 timestamp of placement.")
+    ibkrOrderId: Optional[str] = Field(None, description="IBKR-assigned order ID.")
+
+
+class SessionActivityResponse(BaseModel):
+    """Summary of trading activity for the current session / today."""
+
+    sessionDate: str = Field(..., description="Session date (UTC, YYYY-MM-DD).")
+    ordersPlaced: int = Field(..., description="Orders placed in this session.")
+    ordersFilled: int = Field(..., description="Orders filled in this session.")
+    ordersCancelled: int = Field(..., description="Orders cancelled in this session.")
+    ordersPending: int = Field(..., description="Orders still open.")
+    recentOrders: List[SessionOrderSummary] = Field(
+        default_factory=list, description="Most recent orders (up to 20)."
+    )
+
+
+class AuditLogEntry(BaseModel):
+    """Single audit log entry."""
+
+    id: int = Field(..., description="Row ID.")
+    correlationId: Optional[str] = Field(None, description="Correlation ID.")
+    timestamp: str = Field(..., description="ISO 8601 event timestamp.")
+    eventType: str = Field(..., description="Event type string.")
+    eventData: Dict[str, Any] = Field(default_factory=dict, description="Event payload.")
+    accountId: Optional[str] = Field(None, description="Account associated with the event.")
+
+
+class AuditLogResponse(BaseModel):
+    """Paginated audit log query result."""
+
+    totalReturned: int = Field(..., description="Number of entries in this response.")
+    entries: List[AuditLogEntry] = Field(default_factory=list, description="Audit log entries.")
+    queryFilters: Dict[str, Any] = Field(
+        default_factory=dict, description="Filters applied to this query."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Emergency stop model
+# ---------------------------------------------------------------------------
+
+
+class EmergencyStopResponse(BaseModel):
+    """Result of executing an emergency stop."""
+
+    success: bool = Field(..., description="Whether the emergency stop completed.")
+    ordersCancelled: int = Field(..., description="Number of orders cancelled.")
+    cancelledOrderIds: List[str] = Field(
+        default_factory=list, description="IDs of cancelled orders."
+    )
+    tradingDisabled: bool = Field(..., description="Whether trading was disabled in control.json.")
+    telegramNotified: bool = Field(..., description="Whether a Telegram notification was sent.")
+    message: str = Field(..., description="Human-readable summary.")

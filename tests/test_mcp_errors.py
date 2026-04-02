@@ -306,69 +306,24 @@ class TestHttpStatusMapping:
 
 
 class TestErrorPropagation:
-    """Tests for error propagation through tool calls."""
+    """Tests for error propagation through the direct-core MCP tool layer."""
 
-    @pytest.mark.asyncio
-    async def test_tool_propagates_connection_error(self):
-        """Tool should propagate connection error from API."""
-        from mcp_server.config import MCPConfig
-        from mcp_server.http_client import IBKRAPIClient
+    def test_tool_propagates_connection_error(self):
+        """_tool_error should map IBKRConnectionError to IBKR_CONNECTION_ERROR."""
+        from ibkr_core.client import ConnectionError as IBKRConnectionError
+        from mcp_server.main import _tool_error
 
-        config = MCPConfig(api_base_url="http://localhost:8000")
-        client = IBKRAPIClient(config)
-        client.post = AsyncMock()
+        exc = IBKRConnectionError("Cannot connect to IBKR Gateway")
+        mcp_err = _tool_error(exc)
+        assert mcp_err.code == "IBKR_CONNECTION_ERROR"
+        assert "IBKR Gateway" in mcp_err.message
 
-        response = MagicMock(spec=httpx.Response)
-        response.status_code = 503
-        response.json.return_value = {
-            "error_code": "IBKR_CONNECTION_ERROR",
-            "message": "Cannot connect to IBKR Gateway",
-        }
-        client.post.return_value = response
+    def test_tool_propagates_validation_error(self):
+        """_tool_error should map OrderValidationError to VALIDATION_ERROR."""
+        from ibkr_core.orders import OrderValidationError
+        from mcp_server.main import _tool_error
 
-        with patch("mcp_server.main._app_context") as mock_ctx:
-            mock_ctx.api_client = client
-
-            from mcp_server.main import get_quote
-
-            with pytest.raises(MCPToolError) as exc_info:
-                await get_quote(symbol="AAPL", security_type="STK")
-
-            assert exc_info.value.code == "IBKR_CONNECTION_ERROR"
-
-    @pytest.mark.asyncio
-    async def test_tool_propagates_validation_error(self):
-        """Tool should propagate validation error from API."""
-        from mcp_server.config import MCPConfig
-        from mcp_server.http_client import IBKRAPIClient
-
-        config = MCPConfig(api_base_url="http://localhost:8000")
-        client = IBKRAPIClient(config)
-        client.post = AsyncMock()
-
-        response = MagicMock(spec=httpx.Response)
-        response.status_code = 400
-        response.json.return_value = {
-            "error_code": "ORDER_VALIDATION_ERROR",
-            "message": "Limit price required for LMT orders",
-            "details": {"field": "limitPrice"},
-        }
-        client.post.return_value = response
-
-        with patch("mcp_server.main._app_context") as mock_ctx:
-            mock_ctx.api_client = client
-
-            from mcp_server.main import place_order
-
-            with pytest.raises(MCPToolError) as exc_info:
-                await place_order(
-                    instrument_symbol="AAPL",
-                    instrument_security_type="STK",
-                    side="BUY",
-                    quantity=10,
-                    order_type="LMT",
-                    # Missing limit_price
-                )
-
-            assert exc_info.value.code == "ORDER_VALIDATION_ERROR"
-            assert exc_info.value.details["field"] == "limitPrice"
+        exc = OrderValidationError("Limit price required for LMT orders")
+        mcp_err = _tool_error(exc)
+        assert mcp_err.code == "VALIDATION_ERROR"
+        assert "Limit price" in mcp_err.message

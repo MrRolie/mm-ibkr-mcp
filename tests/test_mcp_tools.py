@@ -8,15 +8,19 @@ from mcp_server.config import MCPConfig
 from mcp_server.main import create_mcp_server
 
 CANONICAL_TOOL_NAMES = [
+    # Health / status
     "ibkr_health",
     "ibkr_get_trading_status",
     "ibkr_get_schedule_status",
+    # Market data
     "ibkr_resolve_contract",
     "ibkr_get_quote",
     "ibkr_get_historical_bars",
+    # Account
     "ibkr_get_account_summary",
     "ibkr_get_positions",
     "ibkr_get_pnl",
+    # Orders
     "ibkr_list_open_orders",
     "ibkr_get_order_status",
     "ibkr_get_order_set_status",
@@ -24,8 +28,26 @@ CANONICAL_TOOL_NAMES = [
     "ibkr_place_order",
     "ibkr_cancel_order",
     "ibkr_cancel_order_set",
+    # Options
     "ibkr_get_option_chain",
     "ibkr_get_option_snapshot",
+    # Telegram human-in-the-loop
+    "ibkr_notify",
+    "ibkr_request_trade_approval",
+    "ibkr_request_live_trading_unlock",
+    "ibkr_check_approval_status",
+    # Risk and impact
+    "ibkr_assess_order_impact",
+    "ibkr_get_portfolio_risk",
+    "ibkr_check_position_limits",
+    # Agent profiles
+    "ibkr_get_agent_profile",
+    "ibkr_validate_against_profile",
+    # Session / audit
+    "ibkr_get_session_activity",
+    "ibkr_get_audit_log",
+    # Emergency
+    "ibkr_emergency_stop",
 ]
 
 
