@@ -1,8 +1,8 @@
 """
-Runtime configuration loader for mm-ibkr-gateway.
+Runtime configuration loader for mm-ibkr-mcp.
 
-Operational settings live in ProgramData config.json so .env can remain minimal
-and reserved for secrets (API_KEY, ADMIN_TOKEN).
+The canonical runtime keeps only MCP-relevant settings: explicit IBKR connection
+details, logging, persistence paths, and the trading schedule window.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from ibkr_core.paths import get_default_data_dir
 
@@ -35,48 +35,26 @@ def get_config_path() -> Path:
 def _default_config() -> Dict[str, Any]:
     storage_dir = DEFAULT_DATA_DIR / "storage"
     log_dir = storage_dir / "logs"
-    watchdog_log_dir = DEFAULT_DATA_DIR / "logs"
     return {
         "schema_version": SCHEMA_VERSION,
-        "api_bind_host": "127.0.0.1",
-        "api_port": 8000,
-        "allowed_ips": "127.0.0.1",
-        "api_request_timeout": 30.0,
-        "ibkr_gateway_host": "127.0.0.1",
-        "paper_gateway_port": 4002,
-        "paper_client_id": 1,
-        "live_gateway_port": 4001,
-        "live_client_id": 777,
-        "ibkr_gateway_path": "",
+        "ibkr_host": "127.0.0.1",
+        "ibkr_port": 4002,
+        "ibkr_client_id": 1,
+        "default_account_id": None,
         "log_level": "INFO",
         "log_format": "json",
         "data_storage_dir": str(storage_dir),
         "log_dir": str(log_dir),
         "audit_db_path": str(storage_dir / "audit.db"),
-        "watchdog_log_dir": str(watchdog_log_dir),
         "control_dir": str(DEFAULT_DATA_DIR),
         "run_window_start": "04:00",
         "run_window_end": "20:00",
         "run_window_days": "Mon,Tue,Wed,Thu,Fri",
         "run_window_timezone": "America/Toronto",
-        "admin_restart_enabled": False,
     }
 
 
 CONFIG_KEYS = set(_default_config().keys())
-
-
-def _coerce_bool(value: Any, default: bool) -> bool:
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    text = str(value).strip().lower()
-    if text in ("true", "1", "yes", "y"):
-        return True
-    if text in ("false", "0", "no", "n"):
-        return False
-    return default
 
 
 def _coerce_int(value: Any, default: int) -> int:
@@ -88,15 +66,6 @@ def _coerce_int(value: Any, default: int) -> int:
         return default
 
 
-def _coerce_float(value: Any, default: float) -> float:
-    if value is None:
-        return default
-    try:
-        return float(value)
-    except (ValueError, TypeError):
-        return default
-
-
 def _coerce_str(value: Any, default: str) -> str:
     if value is None:
         return default
@@ -104,68 +73,54 @@ def _coerce_str(value: Any, default: str) -> str:
     return text if text else default
 
 
+def _coerce_optional_str(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 def _normalize_config(raw: Dict[str, Any]) -> Dict[str, Any]:
     defaults = _default_config()
-    merged: Dict[str, Any] = {**defaults, **raw}
+    filtered = {key: value for key, value in raw.items() if key in CONFIG_KEYS}
+    merged: Dict[str, Any] = {**defaults, **filtered}
 
     merged["schema_version"] = _coerce_int(merged.get("schema_version"), SCHEMA_VERSION)
-    merged["api_bind_host"] = _coerce_str(merged.get("api_bind_host"), defaults["api_bind_host"])
-    merged["api_port"] = _coerce_int(merged.get("api_port"), defaults["api_port"])
-    merged["allowed_ips"] = _coerce_str(merged.get("allowed_ips"), defaults["allowed_ips"])
-    merged["api_request_timeout"] = _coerce_float(
-        merged.get("api_request_timeout"), defaults["api_request_timeout"]
+    merged["ibkr_host"] = _coerce_str(
+        raw.get("ibkr_host") or raw.get("ibkr_gateway_host"),
+        defaults["ibkr_host"],
     )
-    merged["ibkr_gateway_host"] = _coerce_str(
-        merged.get("ibkr_gateway_host"), defaults["ibkr_gateway_host"]
+    merged["ibkr_port"] = _coerce_int(
+        raw.get("ibkr_port"),
+        _coerce_int(raw.get("paper_gateway_port"), defaults["ibkr_port"]),
     )
-    merged["paper_gateway_port"] = _coerce_int(
-        merged.get("paper_gateway_port"), defaults["paper_gateway_port"]
+    merged["ibkr_client_id"] = _coerce_int(
+        raw.get("ibkr_client_id"),
+        _coerce_int(raw.get("paper_client_id"), defaults["ibkr_client_id"]),
     )
-    merged["paper_client_id"] = _coerce_int(
-        merged.get("paper_client_id"), defaults["paper_client_id"]
-    )
-    merged["live_gateway_port"] = _coerce_int(
-        merged.get("live_gateway_port"), defaults["live_gateway_port"]
-    )
-    merged["live_client_id"] = _coerce_int(
-        merged.get("live_client_id"), defaults["live_client_id"]
-    )
-    merged["ibkr_gateway_path"] = _coerce_str(
-        merged.get("ibkr_gateway_path"), defaults["ibkr_gateway_path"]
-    )
-    merged["log_level"] = _coerce_str(merged.get("log_level"), defaults["log_level"]).upper()
-    merged["log_format"] = _coerce_str(merged.get("log_format"), defaults["log_format"]).lower()
+    merged["default_account_id"] = _coerce_optional_str(raw.get("default_account_id"))
+    merged["log_level"] = _coerce_str(raw.get("log_level"), defaults["log_level"]).upper()
+    merged["log_format"] = _coerce_str(raw.get("log_format"), defaults["log_format"]).lower()
     merged["data_storage_dir"] = _coerce_str(
-        merged.get("data_storage_dir"), defaults["data_storage_dir"]
+        raw.get("data_storage_dir"), defaults["data_storage_dir"]
     )
     merged["log_dir"] = _coerce_str(
-        merged.get("log_dir"), str(Path(merged["data_storage_dir"]) / "logs")
+        raw.get("log_dir"), str(Path(merged["data_storage_dir"]) / "logs")
     )
     merged["audit_db_path"] = _coerce_str(
-        merged.get("audit_db_path"), str(Path(merged["data_storage_dir"]) / "audit.db")
+        raw.get("audit_db_path"), str(Path(merged["data_storage_dir"]) / "audit.db")
     )
-    merged["watchdog_log_dir"] = _coerce_str(
-        merged.get("watchdog_log_dir"), defaults["watchdog_log_dir"]
-    )
-    merged["control_dir"] = _coerce_str(
-        merged.get("control_dir"), defaults["control_dir"]
-    )
+    merged["control_dir"] = _coerce_str(raw.get("control_dir"), defaults["control_dir"])
     merged["run_window_start"] = _coerce_str(
-        merged.get("run_window_start"), defaults["run_window_start"]
+        raw.get("run_window_start"), defaults["run_window_start"]
     )
-    merged["run_window_end"] = _coerce_str(
-        merged.get("run_window_end"), defaults["run_window_end"]
-    )
+    merged["run_window_end"] = _coerce_str(raw.get("run_window_end"), defaults["run_window_end"])
     merged["run_window_days"] = _coerce_str(
-        merged.get("run_window_days"), defaults["run_window_days"]
+        raw.get("run_window_days"), defaults["run_window_days"]
     )
     merged["run_window_timezone"] = _coerce_str(
-        merged.get("run_window_timezone"), defaults["run_window_timezone"]
+        raw.get("run_window_timezone"), defaults["run_window_timezone"]
     )
-    merged["admin_restart_enabled"] = _coerce_bool(
-        merged.get("admin_restart_enabled"), defaults["admin_restart_enabled"]
-    )
-
     return merged
 
 
@@ -181,7 +136,6 @@ def load_config_data(create_if_missing: bool = False) -> Dict[str, Any]:
         return _default_config()
 
     try:
-        # Handle Windows-generated UTF-8 with BOM (UTF-8-SIG) from PowerShell Set-Content
         raw = json.loads(path.read_text(encoding="utf-8-sig"))
         if not isinstance(raw, dict):
             raise ValueError("config.json root must be an object")
@@ -213,28 +167,20 @@ def update_config_data(updates: Dict[str, Any], path: Path | None = None) -> Dic
 @dataclass(frozen=True)
 class RuntimeConfig:
     schema_version: int
-    api_bind_host: str
-    api_port: int
-    allowed_ips: str
-    api_request_timeout: float
-    ibkr_gateway_host: str
-    paper_gateway_port: int
-    paper_client_id: int
-    live_gateway_port: int
-    live_client_id: int
-    ibkr_gateway_path: str
+    ibkr_host: str
+    ibkr_port: int
+    ibkr_client_id: int
+    default_account_id: Optional[str]
     log_level: str
     log_format: str
     data_storage_dir: str
     log_dir: str
     audit_db_path: str
-    watchdog_log_dir: str
     control_dir: str
     run_window_start: str
     run_window_end: str
     run_window_days: str
     run_window_timezone: str
-    admin_restart_enabled: bool
 
 
 def load_runtime_config(create_if_missing: bool = False) -> RuntimeConfig:
@@ -242,26 +188,18 @@ def load_runtime_config(create_if_missing: bool = False) -> RuntimeConfig:
     data = load_config_data(create_if_missing=create_if_missing)
     return RuntimeConfig(
         schema_version=data["schema_version"],
-        api_bind_host=data["api_bind_host"],
-        api_port=data["api_port"],
-        allowed_ips=data["allowed_ips"],
-        api_request_timeout=data["api_request_timeout"],
-        ibkr_gateway_host=data["ibkr_gateway_host"],
-        paper_gateway_port=data["paper_gateway_port"],
-        paper_client_id=data["paper_client_id"],
-        live_gateway_port=data["live_gateway_port"],
-        live_client_id=data["live_client_id"],
-        ibkr_gateway_path=data["ibkr_gateway_path"],
+        ibkr_host=data["ibkr_host"],
+        ibkr_port=data["ibkr_port"],
+        ibkr_client_id=data["ibkr_client_id"],
+        default_account_id=data["default_account_id"],
         log_level=data["log_level"],
         log_format=data["log_format"],
         data_storage_dir=data["data_storage_dir"],
         log_dir=data["log_dir"],
         audit_db_path=data["audit_db_path"],
-        watchdog_log_dir=data["watchdog_log_dir"],
         control_dir=data["control_dir"],
         run_window_start=data["run_window_start"],
         run_window_end=data["run_window_end"],
         run_window_days=data["run_window_days"],
         run_window_timezone=data["run_window_timezone"],
-        admin_restart_enabled=data["admin_restart_enabled"],
     )

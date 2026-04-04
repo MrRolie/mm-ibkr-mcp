@@ -57,6 +57,48 @@ def format_trade_approval(
     return "\n".join(lines)
 
 
+def format_trade_intent_approval(
+    approval_id: str,
+    intent_id: str,
+    reason: str,
+    orders_data: List[Dict[str, Any]],
+) -> str:
+    """Format a basket-intent approval request."""
+    lines: List[str] = [
+        "🔔 *TRADE INTENT APPROVAL REQUEST*",
+        "",
+        f"*Intent ID:* `{intent_id}`",
+        f"*Order Count:* {len(orders_data)}",
+        f"*Reason:* {_escape(reason)}",
+        f"*Approval ID:* `{approval_id}`",
+        "",
+        "*Orders:*",
+    ]
+
+    for order in orders_data[:8]:
+        instrument = order.get("instrument", {})
+        symbol = instrument.get("symbol", "?")
+        side = order.get("side", "?")
+        qty = order.get("quantity", "?")
+        order_type = order.get("orderType", "MKT")
+        limit_price = order.get("limitPrice")
+        client_order_id = order.get("clientOrderId")
+        price_str = f" @ ${limit_price:,.4f}" if limit_price else ""
+        line = f"• `{symbol}` {side} {qty} × {order_type}{price_str}"
+        if client_order_id:
+            line += f" \\(`{client_order_id}`\\)"
+        lines.append(line)
+
+    if len(orders_data) > 8:
+        lines.append(f"• \\+{len(orders_data) - 8} more orders")
+
+    lines += [
+        "",
+        "Tap a button to respond:",
+    ]
+    return "\n".join(lines)
+
+
 def format_live_trading_unlock(approval_id: str, reason: str) -> str:
     """Format a live-trading-unlock approval request."""
     return "\n".join([

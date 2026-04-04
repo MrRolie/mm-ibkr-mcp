@@ -83,11 +83,12 @@ from ibkr_core.schedule import get_window_status
 from mcp_server.config import MCPConfig, get_mcp_config
 from mcp_server.errors import MCPToolError
 from mcp_server.models import (
-    AccountStatusResponse,
     AgentProfileResponse,
     ApprovalStatusResponse,
     AuditLogEntry,
     AuditLogResponse,
+    BasketPreviewItem,
+    CancelTradeIntentResponse,
     EmergencyStopResponse,
     GatewayVerificationResponse,
     HealthResponse,
@@ -95,6 +96,7 @@ from mcp_server.models import (
     NotifyResponse,
     OpenOrderInfo,
     OpenOrdersResponse,
+    OrderBasketPreviewResponse,
     OrderImpactResponse,
     OrderSetStatusResponse,
     PortfolioRiskResponse,
@@ -104,6 +106,9 @@ from mcp_server.models import (
     ScheduleStatusResponse,
     SessionActivityResponse,
     SessionOrderSummary,
+    TradeIntentListResponse,
+    TradeIntentOrderInfo,
+    TradeIntentResponse,
     TradingControlExpectation,
     TradingControlUpdateRequest,
     TradingControlUpdateResponse,
@@ -117,6 +122,7 @@ from mcp_server.security import StaticBearerTokenVerifier
 from mcp_server.services import IBKRMCPService
 from mcp_server.telegram.approval import (
     create_approval,
+    create_resolved_approval,
     get_approval,
     mark_used,
     set_telegram_message_id,
@@ -127,11 +133,22 @@ from mcp_server.telegram.notifications import (
     format_live_trading_unlock,
     format_notification,
     format_trade_approval,
+    format_trade_intent_approval,
+)
+from trade_core import (
+    create_trade_intent,
+    get_trade_intent,
+    list_trade_intent_order_ids,
+    list_trade_intents,
+    record_position_snapshot,
+    record_trade_intent_cancellation,
+    record_trade_intent_reconcile,
+    record_trade_intent_submission,
+    set_trade_intent_approval,
+    update_trade_intent_status,
 )
 
 logger = logging.getLogger(__name__)
-
-LIVE_TRADING_ENABLE_CONFIRMATION = "ENABLE LIVE TRADING AND REAL ORDER PLACEMENT"
 
 T = TypeVar("T")
 
@@ -139,6 +156,7 @@ READ_TOOL = ToolAnnotations(readOnlyHint=True, idempotentHint=True)
 PREVIEW_TOOL = ToolAnnotations(readOnlyHint=True)
 WRITE_TOOL = ToolAnnotations(destructiveHint=True)
 IDEMPOTENT_WRITE_TOOL = ToolAnnotations(destructiveHint=True, idempotentHint=True)
+_TELEGRAM_APP_UNSET = object()
 
 
 def _tool_error(exc: Exception) -> MCPToolError:
@@ -179,6 +197,9 @@ def _status_from_control_dict(payload: dict[str, Any]) -> TradingStatusResponse:
         ordersEnabled=payload["orders_enabled"],
         dryRun=payload["dry_run"],
         effectiveDryRun=payload["effective_dry_run"],
+        blockReason=payload.get("block_reason"),
+        updatedAt=payload.get("updated_at"),
+        updatedBy=payload.get("updated_by"),
         liveTradingOverrideFile=payload.get("live_trading_override_file"),
         overrideFileExists=payload.get("override_file_exists"),
         overrideFileMessage=payload.get("override_file_message"),
@@ -250,8 +271,11 @@ def _status_from_control_state(state: ControlState) -> TradingStatusResponse:
         ordersEnabled=state.orders_enabled,
         dryRun=state.dry_run,
         effectiveDryRun=state.effective_dry_run(),
+        blockReason=state.block_reason,
+        updatedAt=state.updated_at,
+        updatedBy=state.updated_by,
         liveTradingOverrideFile=state.live_trading_override_file,
-        overrideFileExists=override_exists if state.is_live_trading_enabled() else None,
+        overrideFileExists=override_exists if state.live_trading_override_file else None,
         overrideFileMessage=override_message or None,
         isLiveTradingEnabled=state.is_live_trading_enabled(),
         validationErrors=validation_errors,
@@ -272,7 +296,119 @@ def _normalize_control_expectation(state: ControlState) -> TradingControlExpecta
         tradingMode=state.trading_mode,
         ordersEnabled=state.orders_enabled,
         dryRun=state.dry_run,
+        blockReason=state.block_reason,
         liveTradingOverrideFile=state.live_trading_override_file,
+    )
+
+
+def _approval_response_from_record(rec: dict[str, Any]) -> ApprovalStatusResponse:
+    """Convert a stored approval record to the typed response model."""
+    return ApprovalStatusResponse(
+        approvalId=rec["approval_id"],
+        approvalType=rec["approval_type"],
+        status=rec["status"],
+        requestedAt=rec["requested_at"],
+        expiresAt=rec["expires_at"],
+        resolvedAt=rec.get("resolved_at"),
+        resolveNote=rec.get("resolve_note"),
+        telegramMessageId=rec.get("telegram_message_id"),
+    )
+
+
+def _ensure_telegram_ready(
+    config: MCPConfig,
+    telegram_cfg: Optional[TelegramConfig],
+    telegram_app: Any = _TELEGRAM_APP_UNSET,
+) -> None:
+    """Raise a configuration error when Telegram mode is required but unavailable."""
+    if config.approval_requires_telegram and telegram_cfg is None:
+        raise MCPToolError(
+            "CONFIG_ERROR",
+            "MCP_ORDER_APPROVAL_MODE=telegram requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID",
+        )
+    if (
+        config.approval_requires_telegram
+        and telegram_app is not _TELEGRAM_APP_UNSET
+        and telegram_app is None
+    ):
+        raise MCPToolError(
+            "CONFIG_ERROR",
+            "Telegram approval mode is enabled but the Telegram bot is not running",
+        )
+
+
+def _validate_approval(
+    approval_id: Optional[str],
+    *,
+    required_type: str,
+) -> Optional[dict[str, Any]]:
+    """Validate an approval record and return it when it is ready for use."""
+    if approval_id is None:
+        raise MCPToolError("APPROVAL_REQUIRED", "approval_id is required for this operation")
+    rec = get_approval(approval_id)
+    if rec is None:
+        raise MCPToolError("INVALID_APPROVAL", f"Approval '{approval_id}' not found.")
+    if rec.get("approval_type") != required_type:
+        raise MCPToolError(
+            "INVALID_APPROVAL",
+            f"Approval '{approval_id}' is type '{rec.get('approval_type')}', expected '{required_type}'.",
+        )
+    status = rec.get("status")
+    if status == "expired":
+        raise MCPToolError("APPROVAL_EXPIRED", "Approval has expired. Request a new one.")
+    if status == "denied":
+        raise MCPToolError(
+            "APPROVAL_DENIED",
+            f"Approval was denied. Note: {rec.get('resolve_note', '')}",
+        )
+    if status == "used":
+        raise MCPToolError(
+            "APPROVAL_ALREADY_USED",
+            "This approval has already been consumed by a previous operation.",
+        )
+    if status != "approved":
+        raise MCPToolError(
+            "APPROVAL_PENDING",
+            f"Approval is still '{status}'. Wait for the human to respond.",
+        )
+    return rec
+
+
+def _trade_intent_response(record: Any) -> TradeIntentResponse:
+    """Convert an internal TradeIntentRecord into the MCP response model."""
+    return TradeIntentResponse(
+        intentId=record.intent_id,
+        intentKey=record.intent_key,
+        accountId=record.account_id,
+        reason=record.reason,
+        status=record.status.value,
+        approvalId=record.approval_id,
+        approvalStatus=record.approval_status,
+        dryRun=record.dry_run,
+        orderCount=record.order_count,
+        ordersSubmitted=record.orders_submitted,
+        ordersFilled=record.orders_filled,
+        ordersCancelled=record.orders_cancelled,
+        ordersFailed=record.orders_failed,
+        lastError=record.last_error,
+        createdAt=record.created_at.isoformat(),
+        updatedAt=record.updated_at.isoformat(),
+        orders=[
+            TradeIntentOrderInfo(
+                intentOrderId=order.intent_order_id,
+                sequenceNo=order.sequence_no,
+                clientOrderId=order.client_order_id,
+                order=order.order,
+                preview=order.preview,
+                status=order.status.value,
+                orderId=order.order_id,
+                ibkrOrderId=order.ibkr_order_id,
+                submittedAt=order.submitted_at.isoformat() if order.submitted_at else None,
+                updatedAt=order.updated_at.isoformat(),
+                lastError=order.last_error,
+            )
+            for order in record.orders
+        ],
     )
 
 
@@ -345,24 +481,31 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
             logger.info("IBKR MCP server shutdown complete")
 
     mcp = FastMCP(
-        name="mm-ibkr-gateway",
+        name="mm-ibkr-mcp",
         instructions=(
-            "IBKR trading tools with safety rails. Canonical workflow:\n"
-            "1. ibkr_get_trading_status + ibkr_get_schedule_status — verify safe state.\n"
-            "2. ibkr_resolve_contract — fully qualify the instrument.\n"
-            "3. ibkr_get_account_summary + ibkr_get_positions — know your book.\n"
-            "4. ibkr_get_portfolio_risk — assess portfolio state.\n"
-            "5. ibkr_get_quote / ibkr_get_historical_bars — check price.\n"
-            "6. For options: ibkr_get_option_chain → ibkr_get_option_snapshot.\n"
-            "7. ibkr_preview_order — estimate execution and margin impact.\n"
-            "8. ibkr_assess_order_impact — portfolio concentration and risk.\n"
-            "9. ibkr_validate_against_profile — confirm within agent profile limits.\n"
-            "10. ibkr_request_trade_approval — send to human via Telegram (required for live).\n"
-            "11. ibkr_check_approval_status — poll until approved or denied.\n"
-            "12. ibkr_place_order with approval_id — execute (approval_id required when live).\n"
-            "NEVER enable live trading without calling ibkr_request_live_trading_unlock first.\n"
-            "NEVER skip ibkr_preview_order before ibkr_place_order.\n"
-            "ALWAYS use a unique clientOrderId for idempotency."
+            "Interactive Brokers MCP tools for account monitoring, single-order execution, "
+            "and durable basket execution. IB Gateway or TWS is assumed to already be "
+            "running and reachable via IBKR_HOST, IBKR_PORT, and IBKR_CLIENT_ID.\n"
+            "Canonical workflow:\n"
+            "1. ibkr_health + ibkr_get_trading_status + ibkr_get_schedule_status — verify "
+            "connectivity and runtime safety.\n"
+            "2. ibkr_get_account_summary + ibkr_get_positions + ibkr_get_portfolio_risk — "
+            "understand the account before trading.\n"
+            "3. ibkr_resolve_contract, ibkr_get_quote, ibkr_get_historical_bars, and the "
+            "options tools — fully qualify and inspect the instrument.\n"
+            "4. ibkr_preview_order or ibkr_preview_order_basket — estimate execution, margin, "
+            "and commission before any submission.\n"
+            "5. ibkr_assess_order_impact + ibkr_validate_against_profile — check portfolio and "
+            "agent-profile constraints.\n"
+            "6. Single-order flow: ibkr_request_trade_approval only when "
+            "MCP_ORDER_APPROVAL_MODE=telegram, then ibkr_place_order.\n"
+            "7. Basket flow: ibkr_create_trade_intent, optionally "
+            "ibkr_request_trade_intent_approval, then ibkr_submit_trade_intent and "
+            "ibkr_reconcile_trade_intent.\n"
+            "8. Use ibkr_cancel_order, ibkr_cancel_trade_intent, or ibkr_emergency_stop only "
+            "on explicit user instruction.\n"
+            "Approval mode is controlled only by MCP_ORDER_APPROVAL_MODE=telegram|yolo.\n"
+            "ALWAYS use a unique clientOrderId for every order."
         ),
         debug=False,
         log_level=config.log_level,
@@ -395,8 +538,8 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         gateway_port = None
         try:
             gateway_config = get_config()
-            gateway_host = gateway_config.ibkr_gateway_host
-            gateway_port = gateway_config.ibkr_gateway_port
+            gateway_host = gateway_config.ibkr_host
+            gateway_port = gateway_config.ibkr_port
         except Exception as exc:
             logger.info("Gateway runtime config unavailable during health check: %s", exc)
 
@@ -431,19 +574,6 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
 
     async def get_schedule_status_model() -> ScheduleStatusResponse:
         return _schedule_from_dict(get_window_status())
-
-    async def get_account_status_model(account_id: Optional[str] = None) -> AccountStatusResponse:
-        def operation(client):
-            summary = get_account_summary(client, account_id=account_id)
-            positions = get_positions(client, account_id=account_id)
-            return summary, positions
-
-        summary, positions = await call_core(operation)
-        return AccountStatusResponse(
-            summary=summary,
-            positions=positions,
-            positionCount=len(positions),
-        )
 
     async def get_positions_model(account_id: Optional[str] = None) -> PositionsResponse:
         def operation(client):
@@ -629,8 +759,8 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         title="Place Order",
         description=(
             "Place a single-leg or bracket order. Requires a clientOrderId. "
-            "When live trading is active and MCP_ENFORCE_TRADE_APPROVAL=true, "
-            "an approval_id from ibkr_request_trade_approval is also required."
+            "When MCP_ORDER_APPROVAL_MODE=telegram, an approval_id from "
+            "ibkr_request_trade_approval is also required."
         ),
         annotations=IDEMPOTENT_WRITE_TOOL,
         structured_output=True,
@@ -645,35 +775,10 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
                 "clientOrderId is required for ibkr_place_order and is used as the idempotency key",
             )
 
-        # Gate: require Telegram approval for live trades when enforcement is enabled.
-        if config.enforce_trade_approval and _current_trading_status().isLiveTradingEnabled:
-            if not approval_id:
-                raise MCPToolError(
-                    "APPROVAL_REQUIRED",
-                    "Live trading with enforce_trade_approval=true requires a valid approval_id. "
-                    "Call ibkr_request_trade_approval first, then pass the returned approval_id here.",
-                )
-            rec = get_approval(approval_id)
-            if rec is None:
-                raise MCPToolError("INVALID_APPROVAL", f"Approval '{approval_id}' not found.")
-            status = rec.get("status")
-            if status == "expired":
-                raise MCPToolError("APPROVAL_EXPIRED", "Trade approval has expired. Request a new one.")
-            if status == "denied":
-                raise MCPToolError(
-                    "APPROVAL_DENIED",
-                    f"Trade was denied. Note: {rec.get('resolve_note', '')}",
-                )
-            if status == "used":
-                raise MCPToolError(
-                    "APPROVAL_ALREADY_USED",
-                    "This approval has already been consumed by a previous ibkr_place_order call.",
-                )
-            if status != "approved":
-                raise MCPToolError(
-                    "APPROVAL_PENDING",
-                    f"Approval is still '{status}'. Wait for the human to respond via Telegram.",
-                )
+        if config.approval_requires_telegram:
+            _ensure_telegram_ready(config, telegram_cfg)
+            _validate_approval(approval_id, required_type="trade")
+            assert approval_id is not None
             mark_used(approval_id)
 
         return await call_core(lambda client: place_order(client, order))
@@ -699,6 +804,397 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         if not order_ids:
             raise MCPToolError("VALIDATION_ERROR", "order_ids must contain at least one order id")
         return await call_core(lambda client: cancel_order_set(client, order_ids))
+
+    @mcp.tool(
+        name="ibkr_preview_order_basket",
+        title="Preview Order Basket",
+        description="Preview a basket of explicit orders without placing them.",
+        annotations=PREVIEW_TOOL,
+        structured_output=True,
+    )
+    async def ibkr_preview_order_basket(orders: list[OrderSpec]) -> OrderBasketPreviewResponse:
+        if not orders:
+            raise MCPToolError("VALIDATION_ERROR", "orders must contain at least one order")
+
+        items: list[BasketPreviewItem] = []
+        warnings: list[str] = []
+        previewed_count = 0
+        failed_count = 0
+        total_notional = 0.0
+        total_commission = 0.0
+        saw_notional = False
+        saw_commission = False
+
+        for order in orders:
+            _ensure_fully_qualified_option(order.instrument)
+            if not order.clientOrderId:
+                raise MCPToolError(
+                    "VALIDATION_ERROR",
+                    "Every basket order must include clientOrderId",
+                )
+            try:
+                preview = await call_core(lambda client, current=order: preview_order(client, current))
+                previewed_count += 1
+                if preview.estimatedNotional is not None:
+                    total_notional += float(preview.estimatedNotional)
+                    saw_notional = True
+                if preview.estimatedCommission is not None:
+                    total_commission += float(preview.estimatedCommission)
+                    saw_commission = True
+                for warning in preview.warnings:
+                    if warning not in warnings:
+                        warnings.append(warning)
+                items.append(
+                    BasketPreviewItem(
+                        clientOrderId=order.clientOrderId,
+                        symbol=order.instrument.symbol,
+                        preview=preview,
+                        error=None,
+                    )
+                )
+            except Exception as exc:
+                failed_count += 1
+                tool_error = _tool_error(exc)
+                items.append(
+                    BasketPreviewItem(
+                        clientOrderId=order.clientOrderId,
+                        symbol=order.instrument.symbol,
+                        preview=None,
+                        error=tool_error.message,
+                    )
+                )
+
+        return OrderBasketPreviewResponse(
+            orderCount=len(orders),
+            previewedCount=previewed_count,
+            failedCount=failed_count,
+            estimatedTotalNotional=round(total_notional, 2) if saw_notional else None,
+            estimatedTotalCommission=round(total_commission, 2) if saw_commission else None,
+            warnings=warnings,
+            items=items,
+        )
+
+    @mcp.tool(
+        name="ibkr_create_trade_intent",
+        title="Create Trade Intent",
+        description=(
+            "Create or return an idempotent basket-style trade intent from explicit orders. "
+            "This persists the basket and optional previews before submission."
+        ),
+        annotations=IDEMPOTENT_WRITE_TOOL,
+        structured_output=True,
+    )
+    async def ibkr_create_trade_intent(
+        orders: list[OrderSpec],
+        reason: str,
+        account_id: Optional[str] = None,
+        preview_orders: bool = True,
+    ) -> TradeIntentResponse:
+        if not orders:
+            raise MCPToolError("VALIDATION_ERROR", "orders must contain at least one order")
+
+        resolved_account_id = (
+            account_id
+            or next((order.accountId for order in orders if order.accountId), None)
+            or get_config().default_account_id
+        )
+        previews: list[Optional[OrderPreview]] = []
+        if preview_orders:
+            for order in orders:
+                _ensure_fully_qualified_option(order.instrument)
+                try:
+                    preview = await call_core(
+                        lambda client, current=order: preview_order(client, current)
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Preview failed while creating trade intent for %s: %s",
+                        order.clientOrderId or order.instrument.symbol,
+                        exc,
+                    )
+                    preview = None
+                previews.append(preview)
+        else:
+            previews = [None] * len(orders)
+
+        record = create_trade_intent(
+            orders=orders,
+            reason=reason,
+            account_id=resolved_account_id,
+            dry_run=_current_trading_status().effectiveDryRun,
+            require_approval=config.approval_requires_telegram,
+            previews=previews,
+        )
+        return _trade_intent_response(record)
+
+    @mcp.tool(
+        name="ibkr_request_trade_intent_approval",
+        title="Request Trade Intent Approval",
+        description=(
+            "Request a single Telegram approval covering a persisted trade intent. "
+            "In YOLO mode, the approval is auto-approved immediately."
+        ),
+        annotations=ToolAnnotations(destructiveHint=False, openWorldHint=True),
+        structured_output=True,
+    )
+    async def ibkr_request_trade_intent_approval(intent_id: str) -> ApprovalStatusResponse:
+        record = get_trade_intent(intent_id)
+        if record is None:
+            raise MCPToolError("NOT_FOUND", f"Trade intent '{intent_id}' not found.")
+
+        request_payload = {
+            "intent_id": record.intent_id,
+            "reason": record.reason,
+            "account_id": record.account_id,
+            "orders": [
+                order.order.model_dump(mode="json", exclude_none=True)
+                for order in record.orders
+            ],
+        }
+
+        if not config.approval_requires_telegram:
+            rec = create_resolved_approval(
+                "trade_intent",
+                request_payload,
+                status="approved",
+                resolve_note="Auto-approved because MCP_ORDER_APPROVAL_MODE=yolo",
+            )
+            set_trade_intent_approval(
+                record.intent_id,
+                approval_id=rec["approval_id"],
+                approval_status=rec["status"],
+            )
+            return _approval_response_from_record(rec)
+
+        _ensure_telegram_ready(config, telegram_cfg, telegram_app)
+        timeout = telegram_cfg.approval_timeout_seconds if telegram_cfg else 300
+        rec = create_approval(
+            "trade_intent",
+            request_payload,
+            timeout_seconds=timeout,
+        )
+        approval_id = rec["approval_id"]
+        set_trade_intent_approval(record.intent_id, approval_id=approval_id, approval_status="pending")
+
+        if telegram_app is not None and telegram_cfg is not None:
+            from mcp_server.telegram.bot import send_approval_request
+
+            message = format_trade_intent_approval(
+                approval_id,
+                record.intent_id,
+                record.reason,
+                request_payload["orders"],
+            )
+            msg_id = await send_approval_request(telegram_app, telegram_cfg, approval_id, message)
+            if msg_id:
+                set_telegram_message_id(approval_id, msg_id)
+
+        latest = get_approval(approval_id) or rec
+        return _approval_response_from_record(latest)
+
+    @mcp.tool(
+        name="ibkr_submit_trade_intent",
+        title="Submit Trade Intent",
+        description=(
+            "Submit the planned orders in a persisted trade intent. "
+            "Requires a trade-intent approval when MCP_ORDER_APPROVAL_MODE=telegram."
+        ),
+        annotations=IDEMPOTENT_WRITE_TOOL,
+        structured_output=True,
+    )
+    async def ibkr_submit_trade_intent(
+        intent_id: str,
+        approval_id: Optional[str] = None,
+    ) -> TradeIntentResponse:
+        record = get_trade_intent(intent_id)
+        if record is None:
+            raise MCPToolError("NOT_FOUND", f"Trade intent '{intent_id}' not found.")
+
+        if config.approval_requires_telegram:
+            _ensure_telegram_ready(config, telegram_cfg)
+            resolved_approval_id = approval_id or record.approval_id
+            rec = _validate_approval(resolved_approval_id, required_type="trade_intent")
+            assert resolved_approval_id is not None
+            set_trade_intent_approval(
+                intent_id,
+                approval_id=resolved_approval_id,
+                approval_status=rec["status"],
+            )
+            mark_used(resolved_approval_id)
+            set_trade_intent_approval(
+                intent_id,
+                approval_id=resolved_approval_id,
+                approval_status="used",
+            )
+            update_trade_intent_status(intent_id, status="SUBMITTING")
+        else:
+            update_trade_intent_status(intent_id, status="SUBMITTING")
+
+        latest = get_trade_intent(intent_id)
+        assert latest is not None
+        for order_info in latest.orders:
+            if order_info.status.value != "PLANNED":
+                continue
+            try:
+                result = await call_core(
+                    lambda client, current=order_info.order: place_order(client, current)
+                )
+            except Exception as exc:
+                tool_error = _tool_error(exc)
+                result = OrderResult(
+                    orderId=None,
+                    clientOrderId=order_info.client_order_id,
+                    status="REJECTED",
+                    orderStatus=None,
+                    errors=[tool_error.message],
+                )
+            record_trade_intent_submission(
+                intent_id=intent_id,
+                intent_order_id=order_info.intent_order_id,
+                order_result=result,
+            )
+
+        refreshed = get_trade_intent(intent_id)
+        assert refreshed is not None
+        return _trade_intent_response(refreshed)
+
+    @mcp.tool(
+        name="ibkr_get_trade_intent",
+        title="Get Trade Intent",
+        description="Fetch the persisted state of a trade intent and its orders.",
+        annotations=READ_TOOL,
+        structured_output=True,
+    )
+    async def ibkr_get_trade_intent(intent_id: str) -> TradeIntentResponse:
+        record = get_trade_intent(intent_id)
+        if record is None:
+            raise MCPToolError("NOT_FOUND", f"Trade intent '{intent_id}' not found.")
+        return _trade_intent_response(record)
+
+    @mcp.tool(
+        name="ibkr_list_trade_intents",
+        title="List Trade Intents",
+        description="List recent persisted trade intents with optional status filtering.",
+        annotations=READ_TOOL,
+        structured_output=True,
+    )
+    async def ibkr_list_trade_intents(
+        status: Optional[str] = None,
+        limit: int = 50,
+    ) -> TradeIntentListResponse:
+        records = list_trade_intents(status=status.upper() if status else None, limit=limit)
+        intents = [_trade_intent_response(record) for record in records]
+        return TradeIntentListResponse(count=len(intents), intents=intents)
+
+    @mcp.tool(
+        name="ibkr_reconcile_trade_intent",
+        title="Reconcile Trade Intent",
+        description="Refresh a trade intent against current broker order status and positions.",
+        annotations=READ_TOOL,
+        structured_output=True,
+    )
+    async def ibkr_reconcile_trade_intent(intent_id: str) -> TradeIntentResponse:
+        record = get_trade_intent(intent_id)
+        if record is None:
+            raise MCPToolError("NOT_FOUND", f"Trade intent '{intent_id}' not found.")
+
+        active_statuses = {"SUBMITTED", "PARTIALLY_FILLED"}
+        for order_info in record.orders:
+            if order_info.order_id is None or order_info.status.value not in active_statuses:
+                continue
+            try:
+                status = await call_core(
+                    lambda client, current_id=order_info.order_id: get_order_status(client, current_id)
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to reconcile order %s in intent %s: %s",
+                    order_info.order_id,
+                    intent_id,
+                    exc,
+                )
+                continue
+            record_trade_intent_reconcile(
+                intent_id=intent_id,
+                intent_order_id=order_info.intent_order_id,
+                order_status=status,
+            )
+
+        try:
+            summary = await call_core(
+                lambda client: get_account_summary(client, account_id=record.account_id)
+            )
+            positions = await call_core(
+                lambda client: get_positions(client, account_id=record.account_id)
+            )
+            record_position_snapshot(
+                account_id=summary.accountId,
+                snapshot_type="trade_intent_reconcile",
+                payload={
+                    "intent_id": intent_id,
+                    "summary": summary.model_dump(mode="json", exclude_none=True),
+                    "positions": [
+                        position.model_dump(mode="json", exclude_none=True)
+                        for position in positions
+                    ],
+                },
+            )
+        except Exception as exc:
+            logger.warning("Failed to record position snapshot for %s: %s", intent_id, exc)
+
+        refreshed = get_trade_intent(intent_id)
+        assert refreshed is not None
+        return _trade_intent_response(refreshed)
+
+    @mcp.tool(
+        name="ibkr_cancel_trade_intent",
+        title="Cancel Trade Intent",
+        description="Cancel all active broker orders associated with a trade intent.",
+        annotations=WRITE_TOOL,
+        structured_output=True,
+    )
+    async def ibkr_cancel_trade_intent(intent_id: str) -> CancelTradeIntentResponse:
+        record = get_trade_intent(intent_id)
+        if record is None:
+            raise MCPToolError("NOT_FOUND", f"Trade intent '{intent_id}' not found.")
+
+        cancelled_ids: list[str] = []
+        failed_count = 0
+        active_statuses = {"SUBMITTED", "PARTIALLY_FILLED"}
+
+        for order_info in record.orders:
+            if order_info.order_id is None or order_info.status.value not in active_statuses:
+                continue
+            try:
+                result = await call_core(
+                    lambda client, current_id=order_info.order_id: cancel_order(client, current_id)
+                )
+            except Exception as exc:
+                result = CancelResult(
+                    orderId=order_info.order_id,
+                    status="REJECTED",
+                    message=_tool_error(exc).message,
+                )
+            updated = record_trade_intent_cancellation(
+                intent_id=intent_id,
+                intent_order_id=order_info.intent_order_id,
+                cancel_result=result,
+            )
+            if result.status == "CANCELLED":
+                cancelled_ids.append(result.orderId)
+            else:
+                failed_count += 1
+            record = updated
+
+        refreshed = get_trade_intent(intent_id)
+        assert refreshed is not None
+        return CancelTradeIntentResponse(
+            intentId=intent_id,
+            cancelledOrderIds=cancelled_ids,
+            cancelledCount=len(cancelled_ids),
+            failedCount=failed_count,
+            intent=_trade_intent_response(refreshed),
+        )
 
     @mcp.tool(
         name="ibkr_get_option_chain",
@@ -789,7 +1285,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         description=(
             "Send a trade approval request to the operator via Telegram. "
             "Returns an approval_id to poll with ibkr_check_approval_status. "
-            "When live trading + enforce_trade_approval=true, this approval_id "
+            "When MCP_ORDER_APPROVAL_MODE=telegram, this approval_id "
             "must be passed to ibkr_place_order."
         ),
         annotations=ToolAnnotations(destructiveHint=False, openWorldHint=True),
@@ -803,11 +1299,18 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         _ensure_fully_qualified_option(order.instrument)
         order_data = order.model_dump(mode="json", exclude_none=True)
         preview_data = preview.model_dump(mode="json", exclude_none=True) if preview else None
-        timeout = (
-            telegram_cfg.approval_timeout_seconds
-            if telegram_cfg
-            else 300
-        )
+        timeout = telegram_cfg.approval_timeout_seconds if telegram_cfg else 300
+
+        if not config.approval_requires_telegram:
+            rec = create_resolved_approval(
+                "trade",
+                {"order": order_data, "preview": preview_data, "reason": reason},
+                status="approved",
+                resolve_note="Auto-approved because MCP_ORDER_APPROVAL_MODE=yolo",
+            )
+            return _approval_response_from_record(rec)
+
+        _ensure_telegram_ready(config, telegram_cfg, telegram_app)
 
         rec = create_approval(
             "trade",
@@ -823,40 +1326,33 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
             msg_id = await send_approval_request(telegram_app, telegram_cfg, approval_id, text)
             if msg_id:
                 set_telegram_message_id(approval_id, msg_id)
-        else:
-            logger.warning(
-                "Telegram not configured — approval %s created but no message sent", approval_id
-            )
-
-        return ApprovalStatusResponse(
-            approvalId=approval_id,
-            approvalType="trade",
-            status="pending",
-            requestedAt=rec["requested_at"],
-            expiresAt=rec["expires_at"],
-            resolvedAt=None,
-            resolveNote=None,
-            telegramMessageId=rec.get("telegram_message_id"),
-        )
+        return _approval_response_from_record(get_approval(approval_id) or rec)
 
     @mcp.tool(
         name="ibkr_request_live_trading_unlock",
         title="Request Live Trading Unlock",
         description=(
-            "Send a live-trading unlock request to the operator via Telegram. "
+            "Send a real-order execution unlock request to the operator via Telegram. "
             "Returns an approval_id — poll ibkr_check_approval_status until resolved. "
-            "The operator must approve BEFORE you call ibkr_admin_update_trading_control "
-            "to enable live trading."
+            "This is mainly useful before changing control.json from dry-run into "
+            "real-order mode."
         ),
         annotations=ToolAnnotations(destructiveHint=False, openWorldHint=True),
         structured_output=True,
     )
     async def ibkr_request_live_trading_unlock(reason: str) -> ApprovalStatusResponse:
-        timeout = (
-            telegram_cfg.live_unlock_timeout_seconds
-            if telegram_cfg
-            else 120
-        )
+        timeout = telegram_cfg.live_unlock_timeout_seconds if telegram_cfg else 120
+
+        if not config.approval_requires_telegram:
+            rec = create_resolved_approval(
+                "live_trading",
+                {"reason": reason},
+                status="approved",
+                resolve_note="Auto-approved because MCP_ORDER_APPROVAL_MODE=yolo",
+            )
+            return _approval_response_from_record(rec)
+
+        _ensure_telegram_ready(config, telegram_cfg, telegram_app)
 
         rec = create_approval(
             "live_trading",
@@ -872,28 +1368,13 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
             msg_id = await send_approval_request(telegram_app, telegram_cfg, approval_id, text)
             if msg_id:
                 set_telegram_message_id(approval_id, msg_id)
-        else:
-            logger.warning(
-                "Telegram not configured — live-trading unlock %s created but no message sent",
-                approval_id,
-            )
-
-        return ApprovalStatusResponse(
-            approvalId=approval_id,
-            approvalType="live_trading",
-            status="pending",
-            requestedAt=rec["requested_at"],
-            expiresAt=rec["expires_at"],
-            resolvedAt=None,
-            resolveNote=None,
-            telegramMessageId=rec.get("telegram_message_id"),
-        )
+        return _approval_response_from_record(get_approval(approval_id) or rec)
 
     @mcp.tool(
         name="ibkr_check_approval_status",
         title="Check Approval Status",
         description=(
-            "Poll the status of a pending trade or live-trading-unlock approval. "
+            "Poll the status of a pending trade, trade-intent, or execution-unlock approval. "
             "Status values: pending | approved | denied | expired | used."
         ),
         annotations=READ_TOOL,
@@ -903,16 +1384,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         rec = get_approval(approval_id)
         if rec is None:
             raise MCPToolError("NOT_FOUND", f"Approval '{approval_id}' not found.")
-        return ApprovalStatusResponse(
-            approvalId=rec["approval_id"],
-            approvalType=rec["approval_type"],
-            status=rec["status"],
-            requestedAt=rec["requested_at"],
-            expiresAt=rec["expires_at"],
-            resolvedAt=rec.get("resolved_at"),
-            resolveNote=rec.get("resolve_note"),
-            telegramMessageId=rec.get("telegram_message_id"),
-        )
+        return _approval_response_from_record(rec)
 
     # -----------------------------------------------------------------------
     # Risk and impact assessment tools
@@ -1314,13 +1786,18 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         trading_disabled = False
         try:
             current = load_control()
-            if current.orders_enabled:
-                updated = replace(current, orders_enabled=False)
+            if current.orders_enabled or current.dry_run is False or current.block_reason != reason:
+                updated = replace(
+                    current,
+                    orders_enabled=False,
+                    dry_run=True,
+                    block_reason=reason,
+                )
                 write_control(updated)
                 write_audit_entry(
                     action="EMERGENCY_STOP",
                     reason=reason,
-                    updated_fields="ordersEnabled",
+                    updated_fields="ordersEnabled,dryRun,blockReason",
                     source="mcp",
                 )
                 reset_config()
@@ -1391,7 +1868,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
             title="Update Trading Control",
             description=(
                 "Safely update control.json with compare-and-swap semantics. "
-                "Required for explicit live trading changes."
+                "Only ordersEnabled, dryRun, and blockReason are supported."
             ),
             annotations=WRITE_TOOL,
             structured_output=True,
@@ -1416,12 +1893,24 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
                     },
                 )
 
+            unsupported_fields: list[str] = []
+            if request.tradingMode is not None:
+                unsupported_fields.append("tradingMode")
+            if request.liveTradingOverrideFile is not None:
+                unsupported_fields.append("liveTradingOverrideFile")
+            if request.liveEnableConfirmation is not None:
+                unsupported_fields.append("liveEnableConfirmation")
+            if unsupported_fields:
+                raise MCPToolError(
+                    "VALIDATION_ERROR",
+                    "Legacy live-trading fields are not supported in mm-ibkr-mcp. "
+                    "Update ordersEnabled, dryRun, and blockReason instead.",
+                    {"unsupportedFields": unsupported_fields},
+                )
+
             updated = replace(current)
             updated_fields: list[str] = []
 
-            if request.tradingMode is not None and request.tradingMode != current.trading_mode:
-                updated.trading_mode = request.tradingMode
-                updated_fields.append("tradingMode")
             if (
                 request.ordersEnabled is not None
                 and request.ordersEnabled != current.orders_enabled
@@ -1431,29 +1920,11 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
             if request.dryRun is not None and request.dryRun != current.dry_run:
                 updated.dry_run = request.dryRun
                 updated_fields.append("dryRun")
-            if request.liveTradingOverrideFile is not None:
-                normalized_path = request.liveTradingOverrideFile.strip() or None
-                if normalized_path != current.live_trading_override_file:
-                    updated.live_trading_override_file = normalized_path
-                    updated_fields.append("liveTradingOverrideFile")
-
-            next_state = TradingControlExpectation(
-                tradingMode=updated.trading_mode,
-                ordersEnabled=updated.orders_enabled,
-                dryRun=updated.dry_run,
-                liveTradingOverrideFile=updated.live_trading_override_file,
-            )
-            if (
-                not current.is_live_trading_enabled()
-                and next_state.tradingMode == "live"
-                and next_state.ordersEnabled
-                and request.liveEnableConfirmation != LIVE_TRADING_ENABLE_CONFIRMATION
-            ):
-                raise MCPToolError(
-                    "CONFIRMATION_REQUIRED",
-                    "Exact live trading confirmation string required before enabling live real-money trading",
-                    {"required": LIVE_TRADING_ENABLE_CONFIRMATION},
-            )
+            if request.blockReason is not None:
+                normalized_reason = request.blockReason.strip() or None
+                if normalized_reason != current.block_reason:
+                    updated.block_reason = normalized_reason
+                    updated_fields.append("blockReason")
 
             validation_errors = validate_control(updated)
             if validation_errors:
@@ -1491,105 +1962,6 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
                 currentState=current_status,
                 message="Trading control updated.",
             )
-
-    if config.enable_legacy_aliases:
-
-        @mcp.tool(
-            name="get_quote",
-            title="Legacy Get Quote",
-            description="Compatibility alias for ibkr_get_quote.",
-            annotations=READ_TOOL,
-            structured_output=True,
-        )
-        async def legacy_get_quote(instrument: SymbolSpec) -> Quote:
-            return await ibkr_get_quote(instrument)
-
-        @mcp.tool(
-            name="get_historical_data",
-            title="Legacy Get Historical Data",
-            description="Compatibility alias for ibkr_get_historical_bars.",
-            annotations=READ_TOOL,
-            structured_output=True,
-        )
-        async def legacy_get_historical_data(
-            instrument: SymbolSpec,
-            bar_size: str,
-            duration: str,
-            what_to_show: str = "TRADES",
-            rth_only: bool = True,
-        ) -> HistoricalBarsResponse:
-            return await ibkr_get_historical_bars(
-                instrument=instrument,
-                bar_size=bar_size,
-                duration=duration,
-                what_to_show=what_to_show,
-                rth_only=rth_only,
-            )
-
-        @mcp.tool(
-            name="get_account_status",
-            title="Legacy Get Account Status",
-            description="Compatibility alias for combined account summary and positions.",
-            annotations=READ_TOOL,
-            structured_output=True,
-        )
-        async def legacy_get_account_status(
-            account_id: Optional[str] = None,
-        ) -> AccountStatusResponse:
-            return await get_account_status_model(account_id=account_id)
-
-        @mcp.tool(
-            name="get_pnl",
-            title="Legacy Get PnL",
-            description="Compatibility alias for ibkr_get_pnl.",
-            annotations=READ_TOOL,
-            structured_output=True,
-        )
-        async def legacy_get_pnl(
-            account_id: Optional[str] = None,
-            timeframe: Optional[str] = None,
-        ) -> AccountPnl:
-            return await ibkr_get_pnl(account_id=account_id, timeframe=timeframe)
-
-        @mcp.tool(
-            name="preview_order",
-            title="Legacy Preview Order",
-            description="Compatibility alias for ibkr_preview_order.",
-            annotations=PREVIEW_TOOL,
-            structured_output=True,
-        )
-        async def legacy_preview_order(order: OrderSpec) -> OrderPreview:
-            return await ibkr_preview_order(order)
-
-        @mcp.tool(
-            name="place_order",
-            title="Legacy Place Order",
-            description="Compatibility alias for ibkr_place_order.",
-            annotations=IDEMPOTENT_WRITE_TOOL,
-            structured_output=True,
-        )
-        async def legacy_place_order(order: OrderSpec) -> OrderResult:
-            return await ibkr_place_order(order)
-
-        @mcp.tool(
-            name="get_order_status",
-            title="Legacy Get Order Status",
-            description="Compatibility alias for ibkr_get_order_status.",
-            annotations=READ_TOOL,
-            structured_output=True,
-        )
-        async def legacy_get_order_status(order_id: str) -> OrderStatus:
-            return await ibkr_get_order_status(order_id)
-
-        @mcp.tool(
-            name="cancel_order",
-            title="Legacy Cancel Order",
-            description="Compatibility alias for ibkr_cancel_order.",
-            annotations=WRITE_TOOL,
-            structured_output=True,
-        )
-        async def legacy_cancel_order(order_id: str) -> CancelResult:
-            return await ibkr_cancel_order(order_id)
 
     @mcp.resource(
         "ibkr://status/overview",
@@ -1670,14 +2042,18 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
             "3. ibkr_get_portfolio_risk — understand current portfolio exposure.\n"
             "4. ibkr_resolve_contract — fully qualify the instrument.\n"
             "5. For options: ibkr_get_option_chain → ibkr_get_option_snapshot.\n"
-            "6. ibkr_preview_order — estimate execution price, margin, and commission.\n"
+            "6. ibkr_preview_order or ibkr_preview_order_basket — estimate execution, "
+            "margin, and commission.\n"
             "7. ibkr_assess_order_impact — compute concentration and buying-power impact.\n"
-            "8. ibkr_validate_against_profile — confirm order is within profile limits.\n"
-            "9. ibkr_request_trade_approval — send the order to the operator for approval.\n"
-            "10. ibkr_check_approval_status — wait until status = 'approved'.\n"
-            "11. ibkr_place_order with the approval_id from step 9.\n"
+            "8. ibkr_validate_against_profile — confirm the order is within profile limits.\n"
+            "9. For a single order: request approval only when "
+            "MCP_ORDER_APPROVAL_MODE=telegram, then call ibkr_place_order.\n"
+            "10. For a basket: ibkr_create_trade_intent, request approval only when "
+            "MCP_ORDER_APPROVAL_MODE=telegram, then ibkr_submit_trade_intent.\n"
+            "11. After submission, use ibkr_get_order_status or "
+            "ibkr_reconcile_trade_intent to confirm execution state.\n"
             "STOP if any step returns errors or warnings that cannot be resolved.\n"
-            "NEVER enable live trading without calling ibkr_request_live_trading_unlock first."
+            "Do not move out of dry-run or enable orders unless the user explicitly instructs it."
         )
 
     @mcp.prompt(
@@ -1711,7 +2087,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
             "2. Side, quantity, and order type match the user's intent.\n"
             "3. Preview warnings are understood.\n"
             "4. A unique clientOrderId is ready for placement.\n"
-            "5. If live trading is enabled, confirm the user explicitly requested real execution."
+            "5. If ordersEnabled=true and dryRun=false, confirm the user explicitly requested real execution."
         )
 
     return mcp

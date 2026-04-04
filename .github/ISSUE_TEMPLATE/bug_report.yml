@@ -1,74 +1,30 @@
-name: Bug Report
-description: Report a bug or unexpected behavior
+name: Bug report
+description: Report a reproducible problem in the MCP repo
 title: "[Bug]: "
-labels: ["bug", "triage"]
+labels: ["bug"]
 body:
-  - type: markdown
-    attributes:
-      value: |
-        Thanks for taking the time to report a bug!
-
   - type: textarea
-    id: description
+    id: summary
     attributes:
-      label: Description
-      description: A clear description of the bug
+      label: Summary
+      description: What happened?
     validations:
       required: true
-
   - type: textarea
-    id: reproduction
+    id: reproduce
     attributes:
-      label: Steps to Reproduce
-      description: Detailed steps to reproduce the behavior
-      placeholder: |
-        1. Configure with '...'
-        2. Run command '...'
-        3. Observe error '...'
+      label: Reproduction
+      description: Steps, inputs, and environment details needed to reproduce the issue.
     validations:
       required: true
-
   - type: textarea
     id: expected
     attributes:
-      label: Expected Behavior
-      description: What you expected to happen
+      label: Expected behavior
     validations:
       required: true
-
-  - type: textarea
-    id: actual
-    attributes:
-      label: Actual Behavior
-      description: What actually happened
-    validations:
-      required: true
-
-  - type: textarea
-    id: environment
-    attributes:
-      label: Environment
-      description: System information
-      value: |
-        - OS: [e.g., macOS 13.0, Ubuntu 22.04]
-        - Python version: [e.g., 3.10.5]
-        - mm-ibkr-gateway version: [e.g., 0.1.0]
-        - IBKR Gateway version: [e.g., 10.19]
-        - Trading mode: [paper/live]
-    validations:
-      required: true
-
   - type: textarea
     id: logs
     attributes:
-      label: Logs
-      description: Relevant logs or error messages
-      render: shell
-
-  - type: checkboxes
-    id: safety
-    attributes:
-      label: Safety Check
-      options:
-        - label: This bug occurred in paper trading mode (or does not involve trading)
-          required: false
+      label: Logs or screenshots
+      description: Remove secrets or private account data before posting.

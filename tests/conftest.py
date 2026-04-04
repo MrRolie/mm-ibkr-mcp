@@ -1,4 +1,4 @@
-"""Pytest configuration for mm-ibkr-gateway tests."""
+"""Pytest configuration for mm-ibkr-mcp tests."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import pytest
 
 
 def pytest_configure() -> None:
-    """Ensure test config opens the run window for API tests."""
+    """Ensure test config opens the run window for local MCP/core tests."""
     if os.environ.get("MM_IBKR_CONFIG_PATH"):
         return
 

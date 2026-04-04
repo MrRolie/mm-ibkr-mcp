@@ -11,7 +11,7 @@ Verifies that:
 import json
 import os
 import tempfile
-from datetime import datetime, timedelta
+from datetime import datetime, timezone
 
 import pytest
 
@@ -138,9 +138,6 @@ class TestAuditLogQuerying:
         """Set up test audit data."""
         self.db = temp_db
 
-        # Record various events
-        base_time = datetime.utcnow()
-
         # Order preview events
         record_audit_event(
             event_type="ORDER_PREVIEW",
@@ -226,6 +223,20 @@ class TestAuditLogQuerying:
         event = events[0]
         assert isinstance(event["event_data"], dict)
         assert "symbol" in event["event_data"]
+
+    def test_recorded_timestamps_are_timezone_aware_utc(self, temp_db):
+        """Audit timestamps should be persisted as timezone-aware UTC ISO strings."""
+        record_audit_event(
+            event_type="UTC_TIMESTAMP_TEST",
+            event_data={"symbol": "AAPL"},
+            db_path=temp_db,
+        )
+
+        events = query_audit_log(event_type="UTC_TIMESTAMP_TEST", db_path=temp_db)
+        parsed = datetime.fromisoformat(events[0]["timestamp"])
+
+        assert parsed.tzinfo is not None
+        assert parsed.utcoffset() == timezone.utc.utcoffset(parsed)
 
 
 class TestOrderStrategyPersistence:

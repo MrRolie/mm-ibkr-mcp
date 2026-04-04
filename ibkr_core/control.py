@@ -1,4 +1,4 @@
-"""Canonical control.json management for mm-ibkr-gateway."""
+"""Canonical control.json management for mm-ibkr-mcp."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import json
 import logging
 import os
 import tempfile
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, Optional
@@ -23,22 +23,36 @@ DEFAULT_CONTROL_DIR = get_default_data_dir()
 class ControlState:
     """Centralized trading control state."""
 
-    trading_mode: Literal["paper", "live"] = "paper"
     orders_enabled: bool = False
     dry_run: bool = True
+    block_reason: Optional[str] = None
+    updated_at: Optional[str] = None
+    updated_by: Optional[str] = None
+    # Legacy compatibility fields. New control.json does not need to persist them.
+    trading_mode: Literal["paper", "live"] = "paper"
     live_trading_override_file: Optional[str] = None
 
     def to_dict(self) -> dict:
         """Serialize to dict for JSON storage."""
-        return asdict(self)
+        payload = {
+            "orders_enabled": self.orders_enabled,
+            "dry_run": self.dry_run,
+            "block_reason": self.block_reason,
+            "updated_at": self.updated_at,
+            "updated_by": self.updated_by,
+        }
+        return payload
 
     @classmethod
     def from_dict(cls, data: dict) -> ControlState:
         """Deserialize from dict, coercing types and applying defaults."""
         return cls(
-            trading_mode=_coerce_trading_mode(data.get("trading_mode", "paper")),
             orders_enabled=_coerce_bool(data.get("orders_enabled", False)),
             dry_run=_coerce_bool(data.get("dry_run", True)),
+            block_reason=_coerce_optional_str(data.get("block_reason")),
+            updated_at=_coerce_optional_str(data.get("updated_at")),
+            updated_by=_coerce_optional_str(data.get("updated_by")),
+            trading_mode=_coerce_trading_mode(data.get("trading_mode", "paper")),
             live_trading_override_file=data.get("live_trading_override_file"),
         )
 
@@ -48,26 +62,15 @@ class ControlState:
         return cls()
 
     def is_live_trading_enabled(self) -> bool:
-        """Check if live trading is fully enabled (live mode + orders enabled)."""
-        return self.trading_mode == "live" and self.orders_enabled
+        """Check whether real order placement is effectively enabled."""
+        return self.orders_enabled and not self.dry_run
 
     def effective_dry_run(self) -> bool:
         """Get effective dry_run state."""
-        if self.is_live_trading_enabled():
-            return False
-        return self.dry_run
+        return self.dry_run or not self.orders_enabled
 
     def validate_override_file(self) -> tuple[bool, str]:
-        """Validate override file requirement for live+enabled."""
-        if not self.is_live_trading_enabled():
-            return True, ""
-
-        if not self.live_trading_override_file:
-            return False, "live_trading_override_file required for live+enabled"
-
-        if not Path(self.live_trading_override_file).exists():
-            return False, f"Override file not found: {self.live_trading_override_file}"
-
+        """Legacy no-op kept for compatibility with older surfaces."""
         return True, ""
 
 
@@ -91,10 +94,6 @@ def get_audit_log_path(base_dir: Optional[Path] = None) -> Path:
 
 def _seed_state_from_env(state: ControlState) -> ControlState:
     """Seed defaults from environment variables when control.json is missing."""
-    trading_mode = os.getenv("TRADING_MODE")
-    if trading_mode:
-        state.trading_mode = _coerce_trading_mode(trading_mode)
-
     orders_enabled = os.getenv("ORDERS_ENABLED")
     if orders_enabled is not None:
         state.orders_enabled = _coerce_bool(orders_enabled)
@@ -102,6 +101,14 @@ def _seed_state_from_env(state: ControlState) -> ControlState:
     dry_run = os.getenv("DRY_RUN")
     if dry_run is not None:
         state.dry_run = _coerce_bool(dry_run)
+
+    block_reason = os.getenv("CONTROL_BLOCK_REASON")
+    if block_reason is not None:
+        state.block_reason = _coerce_optional_str(block_reason)
+
+    trading_mode = os.getenv("TRADING_MODE")
+    if trading_mode:
+        state.trading_mode = _coerce_trading_mode(trading_mode)
 
     override_file = os.getenv("LIVE_TRADING_OVERRIDE_FILE")
     if override_file is not None:
@@ -133,15 +140,10 @@ def load_control(base_dir: Optional[Path] = None) -> ControlState:
 def validate_control(state: ControlState) -> list[str]:
     """Validate control state for consistency."""
     errors = []
-
-    if state.trading_mode not in ("paper", "live"):
-        errors.append(f"Invalid trading_mode: {state.trading_mode}")
-
-    if state.is_live_trading_enabled():
-        valid, msg = state.validate_override_file()
-        if not valid:
-            errors.append(msg)
-
+    if not isinstance(state.orders_enabled, bool):
+        errors.append("orders_enabled must be boolean")
+    if not isinstance(state.dry_run, bool):
+        errors.append("dry_run must be boolean")
     return errors
 
 
@@ -149,6 +151,11 @@ def write_control(state: ControlState, base_dir: Optional[Path] = None) -> Path:
     """Write control state to control.json atomically."""
     control_path = get_control_path(base_dir)
     control_path.parent.mkdir(parents=True, exist_ok=True)
+    state = replace(
+        state,
+        updated_at=datetime.now(timezone.utc).isoformat(),
+        updated_by=state.updated_by or getpass.getuser(),
+    )
 
     temp_fd, temp_path = tempfile.mkstemp(
         suffix=".json",
@@ -197,8 +204,11 @@ def get_control_status(base_dir: Optional[Path] = None) -> dict:
         "orders_enabled": state.orders_enabled,
         "dry_run": state.dry_run,
         "effective_dry_run": state.effective_dry_run(),
+        "block_reason": state.block_reason,
+        "updated_at": state.updated_at,
+        "updated_by": state.updated_by,
         "live_trading_override_file": state.live_trading_override_file,
-        "override_file_exists": override_valid if state.is_live_trading_enabled() else None,
+        "override_file_exists": override_valid if state.live_trading_override_file else None,
         "override_file_message": override_msg if override_msg else None,
         "is_live_trading_enabled": state.is_live_trading_enabled(),
         "validation_errors": errors,
@@ -237,6 +247,13 @@ def _coerce_trading_mode(value: str) -> Literal["paper", "live"]:
     if str(value).lower() == "live":
         return "live"
     return "paper"
+
+
+def _coerce_optional_str(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def _coerce_bool(value) -> bool:

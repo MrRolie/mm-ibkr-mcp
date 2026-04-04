@@ -527,6 +527,7 @@ class TestBracketOrderBuilding:
         with patch("ibkr_core.orders.get_config") as mock_get_config:
             mock_get_config.return_value = MagicMock(
                 orders_enabled=True,
+                dry_run=False,
                 trading_mode="paper",
             )
             with patch("ibkr_core.orders.resolve_contract", return_value=contract):

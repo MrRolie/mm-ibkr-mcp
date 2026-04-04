@@ -1,56 +1,24 @@
-name: Feature Request
-description: Suggest a new feature or enhancement
+name: Feature request
+description: Suggest an improvement to the MCP-first broker workflow
 title: "[Feature]: "
-labels: ["enhancement", "triage"]
+labels: ["enhancement"]
 body:
-  - type: markdown
-    attributes:
-      value: |
-        Thanks for suggesting a feature!
-
   - type: textarea
     id: problem
     attributes:
-      label: Problem Statement
-      description: What problem does this feature solve?
-      placeholder: I need to... but currently...
+      label: Problem or use case
+      description: What are you trying to do?
     validations:
       required: true
-
   - type: textarea
-    id: solution
+    id: proposal
     attributes:
-      label: Proposed Solution
-      description: How would you like this to work?
+      label: Proposed solution
+      description: Describe the change you want.
     validations:
       required: true
-
   - type: textarea
     id: alternatives
     attributes:
-      label: Alternatives Considered
-      description: Other solutions you've considered
-
-  - type: dropdown
-    id: phase
-    attributes:
-      label: Related Phase
-      description: Which implementation phase does this relate to?
-      options:
-        - Phase 0 (Setup & Safety)
-        - Phase 1 (Connection & Contracts)
-        - Phase 2 (Market Data)
-        - Phase 3 (Account Status)
-        - Phase 4 (Orders)
-        - Phase 5 (API)
-        - Phase 6 (MCP/CLI)
-        - Phase 7 (NL Agent)
-        - Phase 8 (Monitoring)
-        - Not sure
-
-  - type: checkboxes
-    id: contribution
-    attributes:
-      label: Contribution
-      options:
-        - label: I'm willing to implement this feature
+      label: Alternatives considered
+      description: Optional.

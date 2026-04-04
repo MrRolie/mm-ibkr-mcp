@@ -1,18 +1,9 @@
 """
 Tests for IBKRClient.
 
-Two test modes:
-  - Unit tests: Test client logic without IBKR connection (mocked)
-  - Integration tests: Test against running IBKR Gateway (requires paper gateway)
-
-Run unit tests only:
-    pytest tests/test_client.py -m "not integration"
-
-Run integration tests:
-    pytest tests/test_client.py -m integration
-
-Run all:
-    pytest tests/test_client.py
+The canonical repo connects to an already-running IB Gateway/TWS using the
+explicit host/port/client-id from config.json. The optional `mode` argument is
+retained only as a safety/status label.
 """
 
 import os
@@ -30,13 +21,13 @@ def reset_config_fixture():
     reset_config()
     old_env = {}
     env_keys = [
-        "IBKR_GATEWAY_HOST",
-        "PAPER_GATEWAY_PORT",
-        "PAPER_CLIENT_ID",
-        "LIVE_GATEWAY_PORT",
-        "LIVE_CLIENT_ID",
+        "IBKR_HOST",
+        "IBKR_PORT",
+        "IBKR_CLIENT_ID",
+        "IBKR_ACCOUNT_ID",
         "TRADING_MODE",
         "ORDERS_ENABLED",
+        "DRY_RUN",
     ]
     for key in env_keys:
         old_env[key] = os.environ.get(key)
@@ -75,13 +66,11 @@ class TestIBKRClientInit:
         assert client.port == 4002
 
     def test_explicit_live_mode(self):
-        """Test explicit live mode."""
-        os.environ["ORDERS_ENABLED"] = "false"  # Prevent config validation failure
-        reset_config()
+        """Explicit live mode should not change the configured connection settings."""
         client = IBKRClient(mode="live")
         assert client.mode == "live"
-        assert client.port == 4001
-        assert client.client_id == 777
+        assert client.port == 4002
+        assert client.client_id == 1
 
     def test_custom_client_id(self):
         """Test custom client ID."""
@@ -229,8 +218,6 @@ class TestCreateClientFunction:
 
     def test_create_client_with_mode(self):
         """Test create_client with explicit mode."""
-        os.environ["ORDERS_ENABLED"] = "false"
-        reset_config()
         client = create_client(mode="live")
         assert client.mode == "live"
 

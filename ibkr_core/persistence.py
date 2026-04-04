@@ -13,7 +13,7 @@ import json
 import logging
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -27,6 +27,11 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DB_PATH = "./data/audit.db"
 SCHEMA_VERSION = 2
+
+
+def _utc_now_iso() -> str:
+    """Return an ISO 8601 timestamp in UTC."""
+    return datetime.now(timezone.utc).isoformat()
 
 
 def get_db_path() -> str:
@@ -251,7 +256,7 @@ def init_database(db_path: Optional[str] = None) -> None:
             # Update schema version
             cursor.execute(
                 "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
-                (SCHEMA_VERSION, datetime.utcnow().isoformat()),
+                (SCHEMA_VERSION, _utc_now_iso()),
             )
 
             log_with_context(
@@ -314,7 +319,7 @@ def record_audit_event(
     if correlation_id is None:
         correlation_id = get_correlation_id()
 
-    timestamp = datetime.utcnow().isoformat()
+    timestamp = _utc_now_iso()
 
     # Extract strategy metadata from the event payload when present
     if strategy_id is None:
@@ -518,7 +523,7 @@ def save_order(
     if virtual_subaccount_id is None:
         virtual_subaccount_id = strategy_id
 
-    timestamp = datetime.utcnow().isoformat()
+    timestamp = _utc_now_iso()
 
     # Serialize JSON fields
     preview_json = json.dumps(preview_data) if preview_data else None
@@ -629,7 +634,7 @@ def update_order_status(
     Returns:
         bool: True if order was found and updated, False otherwise
     """
-    timestamp = datetime.utcnow().isoformat()
+    timestamp = _utc_now_iso()
     fill_json = json.dumps(fill_data) if fill_data else None
 
     with get_db_connection(db_path) as conn:

@@ -1,44 +1,19 @@
-## Description
+## Summary
 
-[Describe the changes in this PR]
+[Describe the change in 2-4 short sentences.]
 
-## Related Issues
+## Validation
 
-Closes #[issue number]
+- [ ] `uv run python -m compileall -q ibkr_core mcp_server trade_core tests`
+- [ ] `uv run pytest -m "not integration" -q`
+- [ ] Manual validation performed when needed
 
-## Type of Change
+## Safety Notes
 
-- [ ] Bug fix (non-breaking change that fixes an issue)
-- [ ] New feature (non-breaking change that adds functionality)
-- [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
-- [ ] Documentation update
-- [ ] Code refactoring
-- [ ] Test improvement
+- [ ] Trading behavior did not change
+- [ ] Or, if trading behavior changed, paper-mode and safety behavior were verified
+- [ ] No secrets, tokens, or account-specific data were added
 
-## Testing
+## Notes
 
-- [ ] Unit tests pass (`pytest -m "not integration"`)
-- [ ] Integration tests pass (if applicable)
-- [ ] Manual testing performed
-
-### Test Details
-
-[Describe how you tested these changes]
-
-## Documentation
-
-- [ ] Updated README.md (if applicable)
-- [ ] Updated API.md (if applicable)
-- [ ] Updated .context docs (if applicable)
-- [ ] Added/updated docstrings
-
-## Safety Checklist (for trading-related changes)
-
-- [ ] Changes tested in paper mode
-- [ ] No accidental removal of safety checks
-- [ ] Order-related changes require explicit confirmation
-- [ ] No hardcoded credentials or API keys
-
-## Additional Notes
-
-[Any additional context, screenshots, or information]
+[Anything an implementer or reviewer should know.]

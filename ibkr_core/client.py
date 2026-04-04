@@ -1,11 +1,9 @@
 """
-IBKR Client wrapper for managing connections to Interactive Brokers Gateway/TWS.
+IBKR client wrapper for connecting to a running Interactive Brokers Gateway/TWS.
 
-Provides a stable, reconnection-aware wrapper around the current broker backend with:
-- Dual mode support (paper/live)
-- Automatic connection management
-- Structured logging
-- Connection health monitoring
+The MCP repo assumes the broker process is already running. This wrapper keeps a
+stable connection and exposes a broker adapter for account, market-data, and
+order flows.
 """
 
 import asyncio
@@ -18,7 +16,6 @@ from ib_insync import IB
 from ibkr_core.broker import BrokerAdapter, IBInsyncBrokerAdapter
 from ibkr_core.config import Config, get_config
 from ibkr_core.logging_config import log_with_context
-from ibkr_core.metrics import record_ibkr_operation, set_connection_status
 
 logger = logging.getLogger(__name__)
 
@@ -26,26 +23,9 @@ logger = logging.getLogger(__name__)
 class ConnectionError(Exception):
     """Raised when connection to IBKR fails."""
 
-    pass
-
 
 class IBKRClient:
-    """
-    Wrapper around the active broker backend for IBKR Gateway/TWS connections.
-
-    Handles connection lifecycle, reconnection logic, and provides
-    a clean interface for the rest of the application.
-
-    Usage:
-        client = IBKRClient()
-        client.connect()
-        # ... use client.broker for adapted operations ...
-        client.disconnect()
-
-    Or as context manager:
-        with IBKRClient() as client:
-            # ... use client.broker for adapted operations ...
-    """
+    """Wrapper around the active broker backend for IBKR Gateway/TWS connections."""
 
     def __init__(
         self,
@@ -58,24 +38,17 @@ class IBKRClient:
 
         Args:
             config: Configuration object. If not provided, uses global config.
-            mode: Override trading mode ('paper' or 'live'). If not provided, uses config.
-            client_id: Override client ID. If not provided, uses config based on mode.
+            mode: Optional execution label ('paper' or 'live') retained for safety status.
+            client_id: Optional client ID override for the connection.
         """
         self._config = config or get_config()
         self._mode = mode.lower() if mode else self._config.trading_mode
-
         if self._mode not in ("paper", "live"):
             raise ValueError(f"Invalid mode: {self._mode}. Must be 'paper' or 'live'.")
 
-        # Select port and client ID based on mode
-        if self._mode == "live":
-            self._port = self._config.live_gateway_port
-            self._client_id = client_id if client_id is not None else self._config.live_client_id
-        else:
-            self._port = self._config.paper_gateway_port
-            self._client_id = client_id if client_id is not None else self._config.paper_client_id
-
-        self._host = self._config.ibkr_gateway_host
+        self._host = self._config.ibkr_host
+        self._port = self._config.ibkr_port
+        self._client_id = client_id if client_id is not None else self._config.ibkr_client_id
         self._ib = IB()
         self._broker = IBInsyncBrokerAdapter(self._ib)
         self._connected = False
@@ -98,7 +71,7 @@ class IBKRClient:
 
     @property
     def mode(self) -> str:
-        """Current trading mode (paper or live)."""
+        """Current execution label (paper or live)."""
         return self._mode
 
     @property
@@ -129,16 +102,7 @@ class IBKRClient:
         return self._broker.managed_accounts()
 
     def connect(self, timeout: int = 10, readonly: bool = False) -> None:
-        """
-        Connect to IBKR Gateway/TWS.
-
-        Args:
-            timeout: Connection timeout in seconds.
-            readonly: If True, connect in read-only mode (no order submission).
-
-        Raises:
-            ConnectionError: If connection fails.
-        """
+        """Connect to IBKR Gateway/TWS."""
         if self.is_connected:
             logger.debug("Already connected to IBKR")
             return
@@ -160,7 +124,6 @@ class IBKRClient:
             import time
 
             start_time = time.time()
-
             self._ib.connect(
                 host=self._host,
                 port=self._port,
@@ -175,10 +138,8 @@ class IBKRClient:
             self._connected = True
             self._connection_time = datetime.now()
 
-            # Log success with account info
             accounts = self._broker.managed_accounts()
             server_time = self._broker.request_current_time()
-
             elapsed_ms = (time.time() - start_time) * 1000
 
             log_with_context(
@@ -191,13 +152,7 @@ class IBKRClient:
                 server_time=str(server_time),
                 elapsed_ms=round(elapsed_ms, 2),
             )
-
-            # Record metrics
-            elapsed_seconds = elapsed_ms / 1000
-            record_ibkr_operation("connect", "success", elapsed_seconds)
-            set_connection_status(self._mode, connected=True)
-
-        except ConnectionRefusedError as e:
+        except ConnectionRefusedError as exc:
             msg = f"Connection refused at {self._host}:{self._port}. Is IBKR Gateway/TWS running?"
             log_with_context(
                 logger,
@@ -209,11 +164,8 @@ class IBKRClient:
                 host=self._host,
                 port=self._port,
             )
-            elapsed_seconds = time.time() - start_time
-            record_ibkr_operation("connect", "error", elapsed_seconds)
-            set_connection_status(self._mode, connected=False)
-            raise ConnectionError(msg) from e
-        except TimeoutError as e:
+            raise ConnectionError(msg) from exc
+        except TimeoutError as exc:
             msg = f"Connection timeout at {self._host}:{self._port}"
             log_with_context(
                 logger,
@@ -226,32 +178,22 @@ class IBKRClient:
                 port=self._port,
                 timeout=timeout,
             )
-            elapsed_seconds = time.time() - start_time
-            record_ibkr_operation("connect", "timeout", elapsed_seconds)
-            set_connection_status(self._mode, connected=False)
-            raise ConnectionError(msg) from e
-        except Exception as e:
-            msg = f"Failed to connect to IBKR: {type(e).__name__}: {e}"
+            raise ConnectionError(msg) from exc
+        except Exception as exc:
+            msg = f"Failed to connect to IBKR: {type(exc).__name__}: {exc}"
             log_with_context(
                 logger,
                 logging.ERROR,
                 "IBKR connection failed",
                 operation="connect",
                 status="error",
-                error_type=type(e).__name__,
-                error=str(e),
+                error_type=type(exc).__name__,
+                error=str(exc),
             )
-            elapsed_seconds = time.time() - start_time
-            record_ibkr_operation("connect", "error", elapsed_seconds)
-            set_connection_status(self._mode, connected=False)
-            raise ConnectionError(msg) from e
+            raise ConnectionError(msg) from exc
 
     def disconnect(self) -> None:
-        """
-        Disconnect from IBKR Gateway/TWS.
-
-        Safe to call even if not connected.
-        """
+        """Disconnect from IBKR Gateway/TWS."""
         if self._ib.isConnected():
             log_with_context(
                 logger,
@@ -268,22 +210,11 @@ class IBKRClient:
                 status="success",
             )
 
-            # Record disconnection metric
-            set_connection_status(self._mode, connected=False)
-
         self._connected = False
         self._connection_time = None
 
     def ensure_connected(self, timeout: int = 10) -> None:
-        """
-        Ensure connection is active, reconnecting if necessary.
-
-        Args:
-            timeout: Connection timeout in seconds.
-
-        Raises:
-            ConnectionError: If connection fails.
-        """
+        """Ensure connection is active, reconnecting if necessary."""
         if self.is_connected:
             return
 
@@ -291,18 +222,7 @@ class IBKRClient:
         self.connect(timeout=timeout)
 
     def get_server_time(self, timeout_s: Optional[float] = None) -> datetime:
-        """
-        Get current server time from IBKR.
-
-        Args:
-            timeout_s: Optional timeout in seconds for the request.
-
-        Returns:
-            Server time as datetime.
-
-        Raises:
-            ConnectionError: If not connected.
-        """
+        """Get current server time from IBKR."""
         if not self.is_connected:
             raise ConnectionError("Not connected to IBKR")
 
@@ -319,16 +239,14 @@ class IBKRClient:
 
         try:
             return loop.run_until_complete(_get_time())
-        except asyncio.TimeoutError as e:
-            raise ConnectionError(f"Server time request timed out after {timeout_s}s") from e
+        except asyncio.TimeoutError as exc:
+            raise ConnectionError(f"Server time request timed out after {timeout_s}s") from exc
 
     def __enter__(self) -> "IBKRClient":
-        """Context manager entry - connect."""
         self.connect()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Context manager exit - disconnect."""
         self.disconnect()
 
     def __repr__(self) -> str:
@@ -336,19 +254,9 @@ class IBKRClient:
         return f"IBKRClient({self._host}:{self._port}, mode={self._mode}, {status})"
 
 
-# Convenience function to create a client with default config
 def create_client(
     mode: Optional[str] = None,
     client_id: Optional[int] = None,
 ) -> IBKRClient:
-    """
-    Create an IBKRClient with the specified parameters.
-
-    Args:
-        mode: Trading mode ('paper' or 'live'). Defaults to config.
-        client_id: Client ID override. Defaults to config based on mode.
-
-    Returns:
-        Configured IBKRClient instance (not connected).
-    """
+    """Create an IBKRClient with optional mode label and client-id override."""
     return IBKRClient(mode=mode, client_id=client_id)

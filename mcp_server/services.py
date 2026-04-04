@@ -38,9 +38,9 @@ class IBKRMCPService:
         self._client: Optional[IBKRClient] = None
         self._lock = asyncio.Lock()
 
-    def _current_config_signature(self) -> tuple[str, str, int]:
+    def _current_config_signature(self) -> tuple[str, int, int]:
         config = get_config()
-        return (config.trading_mode, config.ibkr_gateway_host, config.ibkr_gateway_port)
+        return (config.ibkr_host, config.ibkr_port, config.ibkr_client_id)
 
     def _client_matches_config(self, client: IBKRClient) -> bool:
         mode, host, port = self._current_config_signature()
@@ -48,9 +48,9 @@ class IBKRMCPService:
 
     def _create_client(self) -> IBKRClient:
         config = get_config()
-        base_client_id = config.client_id
+        base_client_id = config.ibkr_client_id
         pid_offset = os.getpid() % 1000
-        return IBKRClient(mode=config.trading_mode, client_id=base_client_id + pid_offset)
+        return IBKRClient(client_id=base_client_id + pid_offset)
 
     async def get_client(self) -> IBKRClient:
         """Return a connected client, reconnecting when config has changed."""

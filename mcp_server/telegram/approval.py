@@ -19,9 +19,7 @@ from pathlib import Path
 from typing import Any, Dict, Literal, Optional
 
 ApprovalStatus = Literal["pending", "approved", "denied", "expired", "used"]
-ApprovalType = Literal["trade", "live_trading"]
-
-_FALLBACK_DB_PATH = "./data/approvals.db"
+ApprovalType = Literal["trade", "trade_intent", "live_trading"]
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS approvals (
@@ -43,13 +41,11 @@ CREATE INDEX IF NOT EXISTS idx_approvals_requested ON approvals(requested_at);
 
 def _db_path() -> str:
     try:
-        from ibkr_core.config import get_config
+        from ibkr_core.persistence import get_db_path
 
-        cfg = get_config()
-        base = Path(cfg.audit_db_path or _FALLBACK_DB_PATH)
-        return str(base.parent / "approvals.db")
+        return str(Path(get_db_path()))
     except Exception:
-        return _FALLBACK_DB_PATH
+        return "./data/audit.db"
 
 
 @contextmanager
@@ -110,6 +106,21 @@ def create_approval(
         "telegram_message_id": None,
         "resolve_note": None,
     }
+
+
+def create_resolved_approval(
+    approval_type: ApprovalType,
+    request_data: Dict[str, Any],
+    *,
+    status: ApprovalStatus,
+    resolve_note: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Create an approval record that is already in a resolved state."""
+    record = create_approval(approval_type, request_data, timeout_seconds=3600)
+    update_approval_status(record["approval_id"], status, resolve_note=resolve_note)
+    refreshed = get_approval(record["approval_id"])
+    assert refreshed is not None
+    return refreshed
 
 
 def get_approval(approval_id: str) -> Optional[Dict[str, Any]]:

@@ -10,8 +10,8 @@ from urllib.parse import urlparse
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp.server import TransportSecuritySettings
 
-
 TransportType = Literal["stdio", "sse", "streamable-http"]
+ApprovalMode = Literal["telegram", "yolo"]
 
 
 def _parse_bool(value: Optional[str], default: bool = False) -> bool:
@@ -45,9 +45,7 @@ def _normalize_path(path: str) -> str:
 
 
 def _default_public_base_url(host: str, port: int) -> str:
-    public_host = host
-    if host == "0.0.0.0":
-        public_host = "127.0.0.1"
+    public_host = "127.0.0.1" if host == "0.0.0.0" else host
     return f"http://{public_host}:{port}"
 
 
@@ -69,18 +67,14 @@ class MCPConfig:
     allowed_hosts: list[str] = field(default_factory=list)
     allowed_origins: list[str] = field(default_factory=list)
     enable_admin_tools: bool = False
-    enable_legacy_aliases: bool = False
     log_level: str = "INFO"
     json_response: bool = False
     stateless_http: bool = False
-    # Telegram human-in-the-loop settings
     telegram_bot_token: Optional[str] = None
     telegram_chat_id: Optional[str] = None
     telegram_approval_timeout_seconds: int = 300
     telegram_live_unlock_timeout_seconds: int = 120
-    # If True, live trades require a valid approval_id from ibkr_request_trade_approval.
-    enforce_trade_approval: bool = False
-    # Agent profile directory and default profile ID.
+    order_approval_mode: ApprovalMode = "telegram"
     agent_profile_dir: Optional[str] = None
     agent_profile_id: str = "default"
 
@@ -102,11 +96,18 @@ class MCPConfig:
             raise ValueError(
                 "MCP_AUTH_TOKEN is required when MCP_TRANSPORT is 'sse' or 'streamable-http'"
             )
+        if self.order_approval_mode not in {"telegram", "yolo"}:
+            raise ValueError("MCP_ORDER_APPROVAL_MODE must be 'telegram' or 'yolo'")
 
     @property
     def telegram_enabled(self) -> bool:
         """Whether Telegram is configured."""
         return bool(self.telegram_bot_token and self.telegram_chat_id)
+
+    @property
+    def approval_requires_telegram(self) -> bool:
+        """Whether the active approval mode requires Telegram verification."""
+        return self.order_approval_mode == "telegram"
 
     @property
     def is_http_transport(self) -> bool:
@@ -136,7 +137,6 @@ class MCPConfig:
             )
 
         if self.host in {"127.0.0.1", "localhost", "::1"}:
-            # Let FastMCP auto-provision its localhost-safe defaults.
             return None
 
         parsed = urlparse(self.public_base_url)
@@ -151,6 +151,7 @@ class MCPConfig:
 
 def get_mcp_config() -> MCPConfig:
     """Load MCP configuration from environment variables."""
+    order_approval_mode = (os.environ.get("MCP_ORDER_APPROVAL_MODE") or "telegram").strip().lower()
     return MCPConfig(
         transport=os.environ.get("MCP_TRANSPORT", "stdio").strip().lower(),
         host=os.environ.get("MCP_HOST", "127.0.0.1"),
@@ -166,7 +167,6 @@ def get_mcp_config() -> MCPConfig:
         allowed_hosts=_parse_csv(os.environ.get("MCP_ALLOWED_HOSTS")),
         allowed_origins=_parse_csv(os.environ.get("MCP_ALLOWED_ORIGINS")),
         enable_admin_tools=_parse_bool(os.environ.get("MCP_ENABLE_ADMIN_TOOLS")),
-        enable_legacy_aliases=_parse_bool(os.environ.get("MCP_ENABLE_LEGACY_ALIASES")),
         log_level=os.environ.get("MCP_LOG_LEVEL", "INFO"),
         json_response=_parse_bool(os.environ.get("MCP_JSON_RESPONSE")),
         stateless_http=_parse_bool(os.environ.get("MCP_STATELESS_HTTP")),
@@ -178,7 +178,7 @@ def get_mcp_config() -> MCPConfig:
         telegram_live_unlock_timeout_seconds=_parse_int(
             os.environ.get("TELEGRAM_LIVE_UNLOCK_TIMEOUT_SECONDS"), 120
         ),
-        enforce_trade_approval=_parse_bool(os.environ.get("MCP_ENFORCE_TRADE_APPROVAL")),
+        order_approval_mode=order_approval_mode or "telegram",
         agent_profile_dir=os.environ.get("MCP_AGENT_PROFILE_DIR") or None,
         agent_profile_id=os.environ.get("MCP_AGENT_PROFILE_ID", "default").strip(),
     )

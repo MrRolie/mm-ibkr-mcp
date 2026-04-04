@@ -7,8 +7,9 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, field_validator
 
 from ibkr_core.models import (
-    AccountSummary,
     Bar,
+    OrderPreview,
+    OrderSpec,
     OrderStatus,
     Position,
 )
@@ -38,6 +39,9 @@ class TradingStatusResponse(BaseModel):
     ordersEnabled: bool = Field(..., description="Whether orders are enabled.")
     dryRun: bool = Field(..., description="Configured dry-run flag.")
     effectiveDryRun: bool = Field(..., description="Effective dry-run status after safety rules.")
+    blockReason: Optional[str] = Field(None, description="Optional operator-supplied block reason.")
+    updatedAt: Optional[str] = Field(None, description="Last control update timestamp.")
+    updatedBy: Optional[str] = Field(None, description="Who last updated control.json.")
     liveTradingOverrideFile: Optional[str] = Field(None, description="Live override file path.")
     overrideFileExists: Optional[bool] = Field(None, description="Whether the override file exists.")
     overrideFileMessage: Optional[str] = Field(None, description="Override-file validation detail.")
@@ -76,14 +80,6 @@ class PositionsResponse(BaseModel):
     accountId: str = Field(..., description="Account identifier.")
     positionCount: int = Field(..., ge=0, description="Number of positions.")
     positions: List[Position] = Field(default_factory=list, description="Open positions.")
-
-
-class AccountStatusResponse(BaseModel):
-    """Legacy combined account status response."""
-
-    summary: AccountSummary = Field(..., description="Account summary.")
-    positions: List[Position] = Field(default_factory=list, description="Open positions.")
-    positionCount: int = Field(..., ge=0, description="Number of positions.")
 
 
 class OpenOrderInfo(BaseModel):
@@ -131,9 +127,13 @@ class GatewayVerificationResponse(BaseModel):
 class TradingControlExpectation(BaseModel):
     """Expected current control state for compare-and-swap updates."""
 
-    tradingMode: str = Field(..., description="Expected trading mode.")
+    tradingMode: str = Field(
+        default="paper",
+        description="Legacy compatibility field mirrored from control.json status.",
+    )
     ordersEnabled: bool = Field(..., description="Expected orders-enabled state.")
     dryRun: bool = Field(..., description="Expected dry-run state.")
+    blockReason: Optional[str] = Field(None, description="Expected control block reason.")
     liveTradingOverrideFile: Optional[str] = Field(
         None,
         description="Expected live override file path.",
@@ -156,16 +156,20 @@ class TradingControlUpdateRequest(BaseModel):
         ...,
         description="Expected current control state; mismatches reject the update.",
     )
-    tradingMode: Optional[str] = Field(None, description="New trading mode.")
+    tradingMode: Optional[str] = Field(
+        None,
+        description="Legacy field. Updates are no longer accepted for this field.",
+    )
     ordersEnabled: Optional[bool] = Field(None, description="New orders-enabled state.")
     dryRun: Optional[bool] = Field(None, description="New dry-run value.")
+    blockReason: Optional[str] = Field(None, description="New operator block reason.")
     liveTradingOverrideFile: Optional[str] = Field(
         None,
-        description="New live override file path; empty string clears it.",
+        description="Legacy field. Updates are no longer accepted for this field.",
     )
     liveEnableConfirmation: Optional[str] = Field(
         None,
-        description="Exact confirmation string required when enabling live real-money trading.",
+        description="Legacy field. No longer used by the canonical control flow.",
     )
 
     @field_validator("tradingMode")
@@ -198,7 +202,10 @@ class ApprovalStatusResponse(BaseModel):
     """Status of a human-in-the-loop approval request."""
 
     approvalId: str = Field(..., description="Unique approval identifier.")
-    approvalType: str = Field(..., description="'trade' or 'live_trading'.")
+    approvalType: str = Field(
+        ...,
+        description="'trade', 'trade_intent', or 'live_trading'.",
+    )
     status: str = Field(
         ...,
         description="Current status: pending | approved | denied | expired | used.",
@@ -216,6 +223,86 @@ class NotifyResponse(BaseModel):
     sent: bool = Field(..., description="Whether the message was sent successfully.")
     telegramMessageId: Optional[int] = Field(None, description="Telegram message ID.")
     message: str = Field(..., description="Human-readable result.")
+
+
+class BasketPreviewItem(BaseModel):
+    """Per-order preview inside a basket preview call."""
+
+    clientOrderId: str = Field(..., description="Client idempotency key.")
+    symbol: str = Field(..., description="Instrument symbol.")
+    preview: Optional[OrderPreview] = Field(None, description="Preview payload when available.")
+    error: Optional[str] = Field(None, description="Preview error when one occurred.")
+
+
+class OrderBasketPreviewResponse(BaseModel):
+    """Preview response for a basket of explicit orders."""
+
+    orderCount: int = Field(..., ge=0, description="Number of orders previewed.")
+    previewedCount: int = Field(..., ge=0, description="Number of successful previews.")
+    failedCount: int = Field(..., ge=0, description="Number of failed previews.")
+    estimatedTotalNotional: Optional[float] = Field(
+        None, description="Sum of estimated notionals across successful previews."
+    )
+    estimatedTotalCommission: Optional[float] = Field(
+        None, description="Sum of estimated commissions across successful previews."
+    )
+    warnings: List[str] = Field(default_factory=list, description="Aggregated preview warnings.")
+    items: List[BasketPreviewItem] = Field(default_factory=list, description="Per-order results.")
+
+
+class TradeIntentOrderInfo(BaseModel):
+    """Response model for a persisted order inside a trade intent."""
+
+    intentOrderId: str = Field(..., description="Internal trade-intent order identifier.")
+    sequenceNo: int = Field(..., ge=0, description="Stable order sequence in the basket.")
+    clientOrderId: str = Field(..., description="Client idempotency key.")
+    order: OrderSpec = Field(..., description="Original order payload.")
+    preview: Optional[OrderPreview] = Field(None, description="Stored preview payload.")
+    status: str = Field(..., description="Current order state.")
+    orderId: Optional[str] = Field(None, description="Primary broker order identifier.")
+    ibkrOrderId: Optional[str] = Field(None, description="IBKR order identifier.")
+    submittedAt: Optional[str] = Field(None, description="Submission timestamp.")
+    updatedAt: str = Field(..., description="Last order-state update timestamp.")
+    lastError: Optional[str] = Field(None, description="Most recent order-level error.")
+
+
+class TradeIntentResponse(BaseModel):
+    """Response model for a basket-oriented trade intent."""
+
+    intentId: str = Field(..., description="Stable trade-intent identifier.")
+    intentKey: str = Field(..., description="Deterministic idempotency key for this basket.")
+    accountId: Optional[str] = Field(None, description="Target IB account.")
+    reason: str = Field(..., description="Operator-facing basket reason.")
+    status: str = Field(..., description="Current trade-intent status.")
+    approvalId: Optional[str] = Field(None, description="Attached approval record.")
+    approvalStatus: Optional[str] = Field(None, description="Approval status for this intent.")
+    dryRun: bool = Field(..., description="Whether the intent is running in dry-run mode.")
+    orderCount: int = Field(..., ge=0, description="Number of orders in the basket.")
+    ordersSubmitted: int = Field(..., ge=0)
+    ordersFilled: int = Field(..., ge=0)
+    ordersCancelled: int = Field(..., ge=0)
+    ordersFailed: int = Field(..., ge=0)
+    lastError: Optional[str] = Field(None, description="Most recent intent-level error.")
+    createdAt: str = Field(..., description="Creation timestamp.")
+    updatedAt: str = Field(..., description="Last update timestamp.")
+    orders: List[TradeIntentOrderInfo] = Field(default_factory=list)
+
+
+class TradeIntentListResponse(BaseModel):
+    """List response for recent trade intents."""
+
+    count: int = Field(..., ge=0, description="Number of intents returned.")
+    intents: List[TradeIntentResponse] = Field(default_factory=list)
+
+
+class CancelTradeIntentResponse(BaseModel):
+    """Result of cancelling active orders for a trade intent."""
+
+    intentId: str = Field(..., description="Trade-intent identifier.")
+    cancelledOrderIds: List[str] = Field(default_factory=list, description="Cancelled broker order ids.")
+    cancelledCount: int = Field(..., ge=0, description="Number of successfully cancelled orders.")
+    failedCount: int = Field(..., ge=0, description="Number of cancellation failures.")
+    intent: TradeIntentResponse = Field(..., description="Updated trade-intent state.")
 
 
 # ---------------------------------------------------------------------------

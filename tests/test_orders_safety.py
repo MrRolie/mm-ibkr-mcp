@@ -71,13 +71,17 @@ def set_control_state(
     *,
     trading_mode: str = "paper",
     orders_enabled: bool = False,
+    dry_run: bool | None = None,
     live_trading_override_file: str | None = None,
 ) -> None:
     """Write control.json for tests and reset config."""
+    if dry_run is None:
+        dry_run = False
     write_control(
         ControlState(
             trading_mode=trading_mode,
             orders_enabled=orders_enabled,
+            dry_run=dry_run,
             live_trading_override_file=live_trading_override_file,
         ),
         base_dir=get_control_path().parent,
@@ -94,7 +98,7 @@ def write_raw_control(trading_mode: str, orders_enabled) -> None:
             {
                 "trading_mode": trading_mode,
                 "orders_enabled": orders_enabled,
-                "dry_run": True,
+                "dry_run": False,
                 "live_trading_override_file": None,
             }
         ),
@@ -233,7 +237,7 @@ class TestOrdersDisabled:
         assert result.status == "SIMULATED"
         assert result.orderId is None
         assert len(result.errors) > 0
-        assert "orders_enabled=false" in result.errors[0].lower()
+        assert "control.json" in result.errors[0].lower()
 
     def test_place_order_does_not_call_placeOrder_when_disabled(
         self, mock_client, valid_order_spec, mock_quote, mock_contract

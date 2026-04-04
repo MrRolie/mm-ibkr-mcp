@@ -993,10 +993,15 @@ def place_order(
             errors=validation_errors,
         )
 
-    # Safety check: orders_enabled (loaded from control.json via config)
-    if not config.orders_enabled:
+    # Safety check: control.json can suppress real placement entirely.
+    if not config.orders_enabled or config.dry_run:
+        reason = (
+            "dry_run=true in control.json"
+            if config.dry_run
+            else "orders_enabled=false in control.json"
+        )
         logger.info(
-            f"orders_enabled=false in control.json - returning simulated result for "
+            f"{reason} - returning simulated result for "
             f"{order_spec.side} {order_spec.quantity} {symbol}"
         )
         return OrderResult(
@@ -1004,7 +1009,7 @@ def place_order(
             clientOrderId=order_spec.clientOrderId,
             status="SIMULATED",
             orderStatus=None,
-            errors=["Order not placed: orders_enabled=false in control.json"],
+            errors=[f"Order not placed: {reason}"],
         )
 
     # If we reach here, orders are enabled - proceed with placement
@@ -1113,6 +1118,9 @@ def place_order(
             config_snapshot = {
                 "trading_mode": config.trading_mode,
                 "orders_enabled": config.orders_enabled,
+                "dry_run": config.dry_run,
+                "ibkr_host": config.ibkr_host,
+                "ibkr_port": config.ibkr_port,
             }
 
             # Save to order history database
@@ -1283,6 +1291,9 @@ def _place_bracket_order(
         config_snapshot = {
             "trading_mode": config.trading_mode,
             "orders_enabled": config.orders_enabled,
+            "dry_run": config.dry_run,
+            "ibkr_host": config.ibkr_host,
+            "ibkr_port": config.ibkr_port,
         }
         account_id = (
             order_spec.accountId

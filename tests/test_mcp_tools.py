@@ -28,6 +28,14 @@ CANONICAL_TOOL_NAMES = [
     "ibkr_place_order",
     "ibkr_cancel_order",
     "ibkr_cancel_order_set",
+    "ibkr_preview_order_basket",
+    "ibkr_create_trade_intent",
+    "ibkr_request_trade_intent_approval",
+    "ibkr_submit_trade_intent",
+    "ibkr_get_trade_intent",
+    "ibkr_list_trade_intents",
+    "ibkr_reconcile_trade_intent",
+    "ibkr_cancel_trade_intent",
     # Options
     "ibkr_get_option_chain",
     "ibkr_get_option_snapshot",
@@ -87,19 +95,6 @@ async def test_admin_tools_are_opt_in():
 
     assert "ibkr_admin_verify_gateway" in tools
     assert "ibkr_admin_update_trading_control" in tools
-
-
-@pytest.mark.asyncio
-async def test_legacy_aliases_are_opt_in():
-    """Legacy non-namespaced aliases should stay hidden by default."""
-    default_tools = {tool.name for tool in await create_mcp_server(MCPConfig()).list_tools()}
-    legacy_tools = {
-        tool.name
-        for tool in await create_mcp_server(MCPConfig(enable_legacy_aliases=True)).list_tools()
-    }
-
-    assert "get_quote" not in default_tools
-    assert {"get_quote", "get_historical_data", "get_account_status"}.issubset(legacy_tools)
 
 
 @pytest.mark.asyncio

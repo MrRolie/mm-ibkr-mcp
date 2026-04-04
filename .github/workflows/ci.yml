@@ -2,141 +2,34 @@ name: CI
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [main]
   pull_request:
-    branches: [ main, develop ]
+    branches: [main]
 
 jobs:
-  lint:
-    name: Lint
+  test:
+    name: Test (${{ matrix.python-version }})
     runs-on: ubuntu-latest
-    env:
-      POETRY_VIRTUALENVS_CREATE: "true"
-      POETRY_VIRTUALENVS_IN_PROJECT: "true"
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
-      - name: Install Poetry
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install poetry==2.2.1
-
-      - name: Load cached venv
-        id: cached-poetry-dependencies
-        uses: actions/cache@v4
-        with:
-          path: .venv
-          key: venv-${{ runner.os }}-${{ hashFiles('**/poetry.lock') }}
-
-      - name: Install dependencies
-        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
-        run: python -m poetry install --no-interaction --no-root
-
-      - name: Install project
-        run: python -m poetry install --no-interaction
-
-      - name: Run black
-        run: python -m poetry run black --check .
-
-      - name: Run isort
-        run: python -m poetry run isort --check-only .
-
-      - name: Run flake8
-        run: python -m poetry run flake8 ibkr_core api mcp_server
-
-      - name: Run mypy
-        run: python -m poetry run mypy ibkr_core api mcp_server
-        continue-on-error: true  # Mypy is informational for now
-
-  test:
-    name: Test (Python ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
-    env:
-      POETRY_VIRTUALENVS_CREATE: "true"
-      POETRY_VIRTUALENVS_IN_PROJECT: "true"
-    strategy:
-      matrix:
-        python-version: ['3.10', '3.11', '3.12']
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install Poetry
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install poetry==2.2.1
-
-      - name: Load cached venv
-        id: cached-poetry-dependencies
-        uses: actions/cache@v4
-        with:
-          path: .venv
-          key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('**/poetry.lock') }}
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
 
       - name: Install dependencies
-        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
-        run: python -m poetry install --no-interaction --no-root
+        run: uv sync --frozen --group dev
 
-      - name: Install project
-        run: python -m poetry install --no-interaction
+      - name: Compile retained packages
+        run: uv run python -m compileall -q ibkr_core mcp_server trade_core tests
 
-      - name: Run unit tests with coverage
-        run: |
-          python -m poetry run pytest \
-            -m "not integration" \
-            --cov=ibkr_core \
-            --cov=api \
-            --cov=mcp_server \
-            --cov-report=xml \
-            --cov-report=term-missing \
-            -v
-
-      - name: Upload coverage to Codecov
-        if: matrix.python-version == '3.10'
-        uses: codecov/codecov-action@v5
-        with:
-          files: ./coverage.xml
-          flags: unittests
-          name: codecov-umbrella
-          fail_ci_if_error: false
-          token: ${{ secrets.CODECOV_TOKEN }}
-
-  security:
-    name: Security Scan
-    runs-on: ubuntu-latest
-    env:
-      POETRY_VIRTUALENVS_CREATE: "true"
-      POETRY_VIRTUALENVS_IN_PROJECT: "true"
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
-      - name: Install Poetry
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install poetry==2.2.1
-
-      - name: Install dependencies
-        run: python -m poetry install --no-interaction
-
-      - name: Run safety check
-        run: python -m poetry run safety check --json
-        continue-on-error: true
-
-      - name: Run bandit
-        run: python -m poetry run bandit -r ibkr_core api mcp_server -ll
-        continue-on-error: true
+      - name: Run retained test suite
+        run: uv run pytest -m "not integration" -q

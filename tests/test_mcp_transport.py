@@ -13,7 +13,7 @@ from mcp.client.streamable_http import streamable_http_client
 
 from ibkr_core.control import load_control
 from mcp_server.config import MCPConfig
-from mcp_server.main import LIVE_TRADING_ENABLE_CONFIRMATION, create_mcp_server
+from mcp_server.main import create_mcp_server
 
 HTTP_CONFIG = MCPConfig(
     transport="streamable-http",
@@ -121,14 +121,14 @@ async def test_place_order_requires_client_order_id():
 
 
 @pytest.mark.asyncio
-async def test_admin_update_requires_live_confirmation():
-    """Switching into live plus enabled orders should require the exact confirmation string."""
+async def test_admin_update_rejects_legacy_live_fields():
+    """Legacy live-trading control fields should be rejected explicitly."""
     server = create_mcp_server(
         replace(HTTP_CONFIG, enable_admin_tools=True)
     )
     payload = {
         "request": {
-            "reason": "test live enable",
+            "reason": "reject legacy fields",
             "expectedCurrentState": {
                 "tradingMode": "paper",
                 "ordersEnabled": False,
@@ -136,8 +136,6 @@ async def test_admin_update_requires_live_confirmation():
                 "liveTradingOverrideFile": None,
             },
             "tradingMode": "live",
-            "ordersEnabled": True,
-            "dryRun": False,
         }
     }
 
@@ -145,7 +143,7 @@ async def test_admin_update_requires_live_confirmation():
         result = await session.call_tool("ibkr_admin_update_trading_control", payload)
 
     assert result.isError is True
-    assert LIVE_TRADING_ENABLE_CONFIRMATION in result.content[0].text
+    assert "Legacy live-trading fields are not supported" in result.content[0].text
 
 
 @pytest.mark.asyncio
