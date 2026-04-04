@@ -114,6 +114,18 @@ export MCP_AUTH_TOKEN=change-me
 uv run ibkr-mcp
 ```
 
+## Remote Execution Host
+
+If IB Gateway runs on another machine, the recommended agent setup is to run `mm-ibkr-mcp` on that execution host and launch it over SSH stdio from the client machine.
+
+Why this is preferred:
+
+- `control.json`, approvals, and audit state stay on the execution host
+- the MCP process connects to the gateway through that host's own `127.0.0.1:4001` / `127.0.0.1:4002`
+- OpenCode or Claude does not need a separate local socket tunnel for the execution workflow
+
+Use local SSH port forwarding only for other applications that require local gateway sockets on the client machine, such as a tracker or sync job that connects directly through `ib_insync`.
+
 ## Canonical tools
 
 Core monitoring and execution:
