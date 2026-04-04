@@ -22,7 +22,7 @@ from ibkr_core.account import (
     get_positions,
 )
 from ibkr_core.client import ConnectionError as IBKRConnectionError
-from ibkr_core.config import InvalidConfigError, get_config, reset_config
+from ibkr_core.config import InvalidConfigError, ensure_runtime_files, get_config, reset_config
 from ibkr_core.control import (
     ControlState,
     get_control_path,
@@ -424,6 +424,7 @@ def _ensure_fully_qualified_option(spec: SymbolSpec) -> None:
 
 def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
     """Create a fully configured FastMCP server instance."""
+    ensure_runtime_files()
     config = config or get_mcp_config()
     service = IBKRMCPService(
         request_timeout=config.request_timeout,
@@ -485,7 +486,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         instructions=(
             "Interactive Brokers MCP tools for account monitoring, single-order execution, "
             "and durable basket execution. IB Gateway or TWS is assumed to already be "
-            "running and reachable via IBKR_HOST, IBKR_PORT, and IBKR_CLIENT_ID.\n"
+            "running and reachable via the IB connection settings in config.json.\n"
             "Canonical workflow:\n"
             "1. ibkr_health + ibkr_get_trading_status + ibkr_get_schedule_status — verify "
             "connectivity and runtime safety.\n"

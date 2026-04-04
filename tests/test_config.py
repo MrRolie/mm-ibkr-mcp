@@ -16,7 +16,7 @@ from ibkr_core.config import (
     load_config,
     reset_config,
 )
-from ibkr_core.control import ControlState, write_control
+from ibkr_core.control import ControlState, get_control_path, load_control, write_control
 from ibkr_core.runtime_config import load_config_data, write_config_data
 
 
@@ -72,6 +72,27 @@ def test_defaults_match_mcp_runtime_contract():
     assert config.client_id == 1
 
 
+def test_first_load_creates_missing_runtime_files(monkeypatch, tmp_path):
+    """First load should persist default config.json and control.json."""
+    reset_config()
+    config_path = tmp_path / "fresh" / "config.json"
+    control_dir = tmp_path / "fresh" / "control"
+
+    monkeypatch.setenv("MM_IBKR_CONFIG_PATH", str(config_path))
+    monkeypatch.setenv("MM_IBKR_CONTROL_DIR", str(control_dir))
+
+    config = load_config()
+
+    assert config.ibkr_host == "127.0.0.1"
+    assert config_path.exists()
+    assert get_control_path(control_dir).exists()
+
+    written = json.loads(config_path.read_text(encoding="utf-8"))
+    assert written["ibkr_host"] == "127.0.0.1"
+    assert written["ibkr_port"] == 4002
+    assert written["ibkr_client_id"] == 1
+
+
 def test_explicit_ibkr_connection_settings_override_defaults(isolated_runtime_env):
     """Explicit host, port, client id, and account id should drive the connection."""
     config_path, _ = isolated_runtime_env
@@ -88,6 +109,26 @@ def test_explicit_ibkr_connection_settings_override_defaults(isolated_runtime_en
     assert config.ibkr_port == 5001
     assert config.ibkr_client_id == 77
     assert config.default_account_id == "DU123456"
+
+
+def test_ibkr_env_vars_do_not_override_config_json(isolated_runtime_env, monkeypatch):
+    """Legacy IBKR env vars should not override the canonical config.json settings."""
+    config_path, _ = isolated_runtime_env
+    config_data = load_config_data()
+    config_data["ibkr_host"] = "10.0.0.5"
+    config_data["ibkr_port"] = 5001
+    config_data["ibkr_client_id"] = 77
+    write_config_data(config_data, path=config_path)
+
+    monkeypatch.setenv("IBKR_HOST", "192.168.10.10")
+    monkeypatch.setenv("IBKR_PORT", "7001")
+    monkeypatch.setenv("IBKR_CLIENT_ID", "999")
+
+    config = load_config()
+
+    assert config.ibkr_host == "10.0.0.5"
+    assert config.ibkr_port == 5001
+    assert config.ibkr_client_id == 77
 
 
 def test_legacy_gateway_fields_migrate_to_canonical_connection(isolated_runtime_env):
@@ -169,6 +210,30 @@ def test_control_state_drives_trading_flags(isolated_runtime_env):
     assert config.orders_enabled is True
     assert config.dry_run is False
     config.check_trading_enabled()
+
+
+def test_legacy_control_env_vars_no_longer_seed_control_defaults(monkeypatch, tmp_path):
+    """Missing control.json should ignore old env-based control toggles."""
+    reset_config()
+    config_path = tmp_path / "legacy-env" / "config.json"
+    control_dir = tmp_path / "legacy-env" / "control"
+
+    monkeypatch.setenv("MM_IBKR_CONFIG_PATH", str(config_path))
+    monkeypatch.setenv("MM_IBKR_CONTROL_DIR", str(control_dir))
+    monkeypatch.setenv("ORDERS_ENABLED", "true")
+    monkeypatch.setenv("DRY_RUN", "false")
+    monkeypatch.setenv("CONTROL_BLOCK_REASON", "env override")
+    monkeypatch.setenv("TRADING_MODE", "live")
+    monkeypatch.setenv("LIVE_TRADING_OVERRIDE_FILE", "/tmp/unlock")
+
+    load_config()
+    state = load_control(control_dir)
+
+    assert state.orders_enabled is False
+    assert state.dry_run is True
+    assert state.block_reason is None
+    assert state.trading_mode == "paper"
+    assert state.live_trading_override_file is None
 
 
 def test_get_config_reloads_after_control_file_change(isolated_runtime_env):

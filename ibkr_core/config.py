@@ -30,6 +30,12 @@ class InvalidConfigError(Exception):
     """Raised when configuration is invalid."""
 
 
+def _effective_control_dir(runtime_control_dir: str) -> str:
+    """Resolve the active control directory with env override support."""
+    env_override = os.environ.get("MM_IBKR_CONTROL_DIR", "").strip()
+    return env_override or runtime_control_dir
+
+
 @dataclass
 class Config:
     """Central configuration holder for the MCP runtime."""
@@ -85,13 +91,19 @@ class Config:
 
 def load_config() -> Config:
     """Load and validate configuration from config.json and control.json."""
-    runtime = load_runtime_config()
+    runtime = load_runtime_config(create_if_missing=True)
+    control_dir = _effective_control_dir(runtime.control_dir)
 
-    if runtime.control_dir:
-        os.environ["MM_IBKR_CONTROL_DIR"] = runtime.control_dir
+    if control_dir:
+        os.environ["MM_IBKR_CONTROL_DIR"] = control_dir
 
-    from ibkr_core.control import get_control_path, load_control as _load_control_state
+    from ibkr_core.control import (
+        ensure_control_file,
+        get_control_path,
+        load_control as _load_control_state,
+    )
 
+    ensure_control_file(Path(control_dir))
     control_state = _load_control_state()
     logger.debug(
         "Loaded trading controls from control.json at %s: mode=%s, orders=%s dry_run=%s",
@@ -118,11 +130,25 @@ def load_config() -> Config:
         run_window_end=runtime.run_window_end,
         run_window_days=runtime.run_window_days,
         run_window_timezone=runtime.run_window_timezone,
-        control_dir=runtime.control_dir,
+        control_dir=control_dir,
         live_trading_override_file=control_state.live_trading_override_file,
     )
     config.validate()
     return config
+
+
+def ensure_runtime_files() -> tuple[Path, Path]:
+    """Persist default runtime artifacts when they do not already exist."""
+    runtime = load_runtime_config(create_if_missing=True)
+    control_dir = _effective_control_dir(runtime.control_dir)
+
+    if control_dir:
+        os.environ["MM_IBKR_CONTROL_DIR"] = control_dir
+
+    from ibkr_core.control import ensure_control_file, get_control_path
+
+    ensure_control_file(Path(control_dir))
+    return get_config_path(), get_control_path(Path(control_dir))
 
 
 _config: Optional[Config] = None

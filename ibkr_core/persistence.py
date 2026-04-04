@@ -510,7 +510,7 @@ def save_order(
         ibkr_order_id: IBKR's order ID
         preview_data: Order preview data
         fill_data: Fill/execution data
-        config_snapshot: Configuration at order time (TRADING_MODE, ORDERS_ENABLED, etc.)
+        config_snapshot: Configuration and control state at order time
         market_snapshot: Market conditions at order time (quote data)
         db_path: Optional database path override
         strategy_id: Optional strategy identifier for virtual subaccount tracking

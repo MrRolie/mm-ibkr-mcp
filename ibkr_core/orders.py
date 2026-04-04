@@ -8,8 +8,8 @@ Provides order lifecycle management with safety rails:
 - Order status tracking
 
 Safety features:
-- ORDERS_ENABLED=false prevents all real order placement
-- TRADING_MODE=live requires explicit override file
+- control.json prevents real order placement until orders are enabled
+- dry_run=true in control.json forces simulated results
 - In-memory order registry for tracking
 """
 
@@ -951,8 +951,9 @@ def place_order(
     """
     Place an order with safety checks.
 
-    If ORDERS_ENABLED=false, returns a simulated result without placing.
-    If ORDERS_ENABLED=true, places the order via IBKR API.
+    If control.json disables order placement, returns a simulated result
+    without placing. If orders are enabled and dry_run is false, places the
+    order via the IBKR API.
 
     Supports all order types including advanced orders (TRAIL, BRACKET, MOC, OPG).
     For BRACKET orders, places 3 linked orders (entry + take profit + stop loss).

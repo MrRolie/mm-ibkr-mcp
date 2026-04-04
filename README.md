@@ -44,12 +44,25 @@ Safe defaults are:
 
 ## Configuration
 
-Copy `.env.example` to `.env` and set at minimum:
+On first start, `uv run ibkr-mcp` creates safe defaults for:
+
+- `data/ibkr-mcp/config.json`
+- `data/ibkr-mcp/control.json`
+
+Edit `config.json` to match your local IB Gateway or TWS connection:
+
+```json
+{
+  "ibkr_host": "127.0.0.1",
+  "ibkr_port": 4002,
+  "ibkr_client_id": 1,
+  "default_account_id": null
+}
+```
+
+`.env` is optional. Copy `.env.example` to `.env` only if you want Telegram approval or explicit yolo mode:
 
 ```bash
-IBKR_HOST=127.0.0.1
-IBKR_PORT=4002
-IBKR_CLIENT_ID=1
 MCP_ORDER_APPROVAL_MODE=telegram
 ```
 
@@ -60,11 +73,18 @@ TELEGRAM_BOT_TOKEN=...
 TELEGRAM_CHAT_ID=...
 ```
 
-Optional:
+For monitoring only, you can leave `.env` empty and use the default approval posture.
+
+Advanced-only environment overrides:
 
 ```bash
-IBKR_ACCOUNT_ID=...
 MM_IBKR_DATA_DIR=/path/to/data
+MM_IBKR_CONFIG_PATH=/path/to/config.json
+MM_IBKR_CONTROL_DIR=/path/to/control-dir
+MCP_TRANSPORT=streamable-http
+MCP_HOST=127.0.0.1
+MCP_PORT=8001
+MCP_AUTH_TOKEN=change-me
 MCP_ENABLE_ADMIN_TOOLS=true
 ```
 
@@ -82,7 +102,9 @@ Start the MCP server over stdio:
 uv run ibkr-mcp
 ```
 
-Run over HTTP:
+The default transport is local `stdio`, which is the lowest-friction MCP setup for Claude Code/Desktop style clients.
+
+Run over HTTP only for advanced self-hosted setups:
 
 ```bash
 export MCP_TRANSPORT=streamable-http

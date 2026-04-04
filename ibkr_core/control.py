@@ -92,32 +92,6 @@ def get_audit_log_path(base_dir: Optional[Path] = None) -> Path:
     return get_base_dir(base_dir) / "control.log"
 
 
-def _seed_state_from_env(state: ControlState) -> ControlState:
-    """Seed defaults from environment variables when control.json is missing."""
-    orders_enabled = os.getenv("ORDERS_ENABLED")
-    if orders_enabled is not None:
-        state.orders_enabled = _coerce_bool(orders_enabled)
-
-    dry_run = os.getenv("DRY_RUN")
-    if dry_run is not None:
-        state.dry_run = _coerce_bool(dry_run)
-
-    block_reason = os.getenv("CONTROL_BLOCK_REASON")
-    if block_reason is not None:
-        state.block_reason = _coerce_optional_str(block_reason)
-
-    trading_mode = os.getenv("TRADING_MODE")
-    if trading_mode:
-        state.trading_mode = _coerce_trading_mode(trading_mode)
-
-    override_file = os.getenv("LIVE_TRADING_OVERRIDE_FILE")
-    if override_file is not None:
-        override_file = override_file.strip()
-        state.live_trading_override_file = override_file if override_file else None
-
-    return state
-
-
 def load_control(base_dir: Optional[Path] = None) -> ControlState:
     """Load control state from control.json."""
     control_path = get_control_path(base_dir)
@@ -187,7 +161,7 @@ def ensure_control_file(base_dir: Optional[Path] = None) -> ControlState:
     if control_path.exists():
         return load_control(base_dir)
 
-    state = _seed_state_from_env(ControlState.defaults())
+    state = ControlState.defaults()
     write_control(state, base_dir)
     logger.info("Created control.json at %s", control_path)
     return state
