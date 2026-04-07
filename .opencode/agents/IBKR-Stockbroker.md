@@ -87,15 +87,14 @@ Before placing any order, execute these steps:
 
 **3. Single Order Flow**
 1. Preview and assess impact.
-2. `ibkr_request_trade_approval` (sends Telegram request).
-3. Poll `ibkr_check_approval_status` or wait for the user to confirm they tapped Approve.
-4. Use the `ibkr_place_order` tool using the `approval_id`.
+2. `ibkr_request_trade_approval` (sends Telegram request and blocks waiting for response).
+3. If it returns 'approved', immediately use the `ibkr_place_order` tool with the `approval_id`. If it times out returning 'pending', wait for the user to confirm approval.
 
 **4. Basket Intent Flow**
 1. `ibkr_preview_order_basket`.
 2. `ibkr_create_trade_intent`.
-3. `ibkr_request_trade_intent_approval`.
-4. `ibkr_submit_trade_intent` once approved in Telegram.
+3. `ibkr_request_trade_intent_approval` (blocks waiting for response).
+4. If approved, immediately call `ibkr_submit_trade_intent`.
 
 ## Clarification policy
 

@@ -337,6 +337,20 @@ def _ensure_telegram_ready(
         )
 
 
+
+async def _wait_for_approval_resolution(approval_id: str, timeout_s: float = 50.0) -> dict:
+    import time
+    import asyncio
+    from ibkr_core.persistence import get_approval
+
+    start = time.time()
+    while time.time() - start < timeout_s:
+        rec = get_approval(approval_id)
+        if rec and rec.get("status") != "pending":
+            return rec
+        await asyncio.sleep(2.0)
+    return get_approval(approval_id) or {}
+
 def _validate_approval(
     approval_id: Optional[str],
     *,
@@ -992,7 +1006,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
             if msg_id:
                 set_telegram_message_id(approval_id, msg_id)
 
-        latest = get_approval(approval_id) or rec
+        latest = await _wait_for_approval_resolution(approval_id, timeout_s=50.0) or rec
         return _approval_response_from_record(latest)
 
     @mcp.tool(
@@ -1329,7 +1343,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
             msg_id = await send_approval_request(telegram_app, telegram_cfg, approval_id, text)
             if msg_id:
                 set_telegram_message_id(approval_id, msg_id)
-        return _approval_response_from_record(get_approval(approval_id) or rec)
+        return _approval_response_from_record(await _wait_for_approval_resolution(approval_id, timeout_s=50.0) or rec)
 
     @mcp.tool(
         name="request_environment_change",
@@ -1380,7 +1394,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
             msg_id = await send_approval_request(telegram_app, telegram_cfg, approval_id, text)
             if msg_id:
                 set_telegram_message_id(approval_id, msg_id)
-        return _approval_response_from_record(get_approval(approval_id) or rec)
+        return _approval_response_from_record(await _wait_for_approval_resolution(approval_id, timeout_s=50.0) or rec)
 
     @mcp.tool(
         name="execute_environment_change",
