@@ -597,67 +597,67 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         )
 
     @mcp.tool(
-        name="ibkr_health",
+        name="health",
         title="IBKR Health",
         description="Check gateway connectivity and basic runtime health.",
         annotations=READ_TOOL,
         structured_output=True,
     )
-    async def ibkr_health() -> HealthResponse:
+    async def health() -> HealthResponse:
         return await get_health_model()
 
     @mcp.tool(
-        name="ibkr_get_trading_status",
+        name="get_trading_status",
         title="Trading Status",
         description="Inspect trading-control state from control.json.",
         annotations=READ_TOOL,
         structured_output=True,
     )
-    async def ibkr_get_trading_status() -> TradingStatusResponse:
+    async def get_trading_status() -> TradingStatusResponse:
         return await get_trading_status_model()
 
     @mcp.tool(
-        name="ibkr_get_schedule_status",
+        name="get_schedule_status",
         title="Schedule Status",
         description="Inspect the configured trading schedule window.",
         annotations=READ_TOOL,
         structured_output=True,
     )
-    async def ibkr_get_schedule_status() -> ScheduleStatusResponse:
+    async def get_schedule_status() -> ScheduleStatusResponse:
         return await get_schedule_status_model()
 
     @mcp.tool(
-        name="ibkr_resolve_contract",
+        name="resolve_contract",
         title="Resolve Contract",
         description="Resolve a SymbolSpec into a fully qualified IBKR contract.",
         annotations=READ_TOOL,
         structured_output=True,
     )
-    async def ibkr_resolve_contract(instrument: SymbolSpec) -> ResolvedContract:
+    async def resolve_contract(instrument: SymbolSpec) -> ResolvedContract:
         _ensure_fully_qualified_option(instrument)
         return await call_core(
             lambda client: contract_to_resolved_contract(resolve_contract(instrument, client))
         )
 
     @mcp.tool(
-        name="ibkr_get_quote",
+        name="get_quote",
         title="Get Quote",
         description="Get a market-data snapshot for a fully specified instrument.",
         annotations=READ_TOOL,
         structured_output=True,
     )
-    async def ibkr_get_quote(instrument: SymbolSpec) -> Quote:
+    async def get_quote(instrument: SymbolSpec) -> Quote:
         _ensure_fully_qualified_option(instrument)
         return await call_core(lambda client: get_quote(instrument, client))
 
     @mcp.tool(
-        name="ibkr_get_historical_bars",
+        name="get_historical_bars",
         title="Get Historical Bars",
         description="Get historical OHLCV bars for a fully specified instrument.",
         annotations=READ_TOOL,
         structured_output=True,
     )
-    async def ibkr_get_historical_bars(
+    async def get_historical_bars(
         instrument: SymbolSpec,
         bar_size: str,
         duration: str,
@@ -678,33 +678,33 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         return HistoricalBarsResponse(symbol=instrument.symbol, barCount=len(bars), bars=bars)
 
     @mcp.tool(
-        name="ibkr_get_account_summary",
+        name="get_account_summary",
         title="Get Account Summary",
         description="Get balances, buying power, and margin metrics for an account.",
         annotations=READ_TOOL,
         structured_output=True,
     )
-    async def ibkr_get_account_summary(account_id: Optional[str] = None) -> AccountSummary:
+    async def get_account_summary(account_id: Optional[str] = None) -> AccountSummary:
         return await call_core(lambda client: get_account_summary(client, account_id=account_id))
 
     @mcp.tool(
-        name="ibkr_get_positions",
+        name="get_positions",
         title="Get Positions",
         description="List open positions for an account.",
         annotations=READ_TOOL,
         structured_output=True,
     )
-    async def ibkr_get_positions(account_id: Optional[str] = None) -> PositionsResponse:
+    async def get_positions(account_id: Optional[str] = None) -> PositionsResponse:
         return await get_positions_model(account_id=account_id)
 
     @mcp.tool(
-        name="ibkr_get_pnl",
+        name="get_pnl",
         title="Get PnL",
         description="Get account P&L with per-symbol breakdown.",
         annotations=READ_TOOL,
         structured_output=True,
     )
-    async def ibkr_get_pnl(
+    async def get_pnl(
         account_id: Optional[str] = None,
         timeframe: Optional[str] = None,
     ) -> AccountPnl:
@@ -713,52 +713,52 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         )
 
     @mcp.tool(
-        name="ibkr_list_open_orders",
+        name="list_open_orders",
         title="List Open Orders",
         description="List currently open orders on the active IBKR connection.",
         annotations=READ_TOOL,
         structured_output=True,
     )
-    async def ibkr_list_open_orders() -> OpenOrdersResponse:
+    async def list_open_orders() -> OpenOrdersResponse:
         payload = await call_core(lambda client: get_open_orders(client))
         return _open_orders_from_list(payload)
 
     @mcp.tool(
-        name="ibkr_get_order_status",
+        name="get_order_status",
         title="Get Order Status",
         description="Get the latest status for a single order id.",
         annotations=READ_TOOL,
         structured_output=True,
     )
-    async def ibkr_get_order_status(order_id: str) -> OrderStatus:
+    async def get_order_status(order_id: str) -> OrderStatus:
         return await call_core(lambda client: get_order_status(client, order_id))
 
     @mcp.tool(
-        name="ibkr_get_order_set_status",
+        name="get_order_set_status",
         title="Get Order Set Status",
         description="Get aggregate status for a list of related order ids.",
         annotations=READ_TOOL,
         structured_output=True,
     )
-    async def ibkr_get_order_set_status(order_ids: list[str]) -> OrderSetStatusResponse:
+    async def get_order_set_status(order_ids: list[str]) -> OrderSetStatusResponse:
         if not order_ids:
             raise MCPToolError("VALIDATION_ERROR", "order_ids must contain at least one order id")
         found_orders = await call_core(lambda client: get_order_set_status(client, order_ids))
         return _order_set_response(order_ids, found_orders)
 
     @mcp.tool(
-        name="ibkr_preview_order",
+        name="preview_order",
         title="Preview Order",
         description="Preview a single-leg or bracket order without placing it.",
         annotations=PREVIEW_TOOL,
         structured_output=True,
     )
-    async def ibkr_preview_order(order: OrderSpec) -> OrderPreview:
+    async def preview_order(order: OrderSpec) -> OrderPreview:
         _ensure_fully_qualified_option(order.instrument)
         return await call_core(lambda client: preview_order(client, order))
 
     @mcp.tool(
-        name="ibkr_place_order",
+        name="place_order",
         title="Place Order",
         description=(
             "Place a single-leg or bracket order. Requires a clientOrderId. "
@@ -768,7 +768,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         annotations=IDEMPOTENT_WRITE_TOOL,
         structured_output=True,
     )
-    async def ibkr_place_order(
+    async def place_order(
         order: OrderSpec, approval_id: Optional[str] = None
     ) -> OrderResult:
         _ensure_fully_qualified_option(order.instrument)
@@ -787,35 +787,35 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         return await call_core(lambda client: place_order(client, order))
 
     @mcp.tool(
-        name="ibkr_cancel_order",
+        name="cancel_order",
         title="Cancel Order",
         description="Cancel a single open order by order id.",
         annotations=WRITE_TOOL,
         structured_output=True,
     )
-    async def ibkr_cancel_order(order_id: str) -> CancelResult:
+    async def cancel_order(order_id: str) -> CancelResult:
         return await call_core(lambda client: cancel_order(client, order_id))
 
     @mcp.tool(
-        name="ibkr_cancel_order_set",
+        name="cancel_order_set",
         title="Cancel Order Set",
         description="Cancel a set of related orders, such as bracket legs.",
         annotations=WRITE_TOOL,
         structured_output=True,
     )
-    async def ibkr_cancel_order_set(order_ids: list[str]) -> CancelResult:
+    async def cancel_order_set(order_ids: list[str]) -> CancelResult:
         if not order_ids:
             raise MCPToolError("VALIDATION_ERROR", "order_ids must contain at least one order id")
         return await call_core(lambda client: cancel_order_set(client, order_ids))
 
     @mcp.tool(
-        name="ibkr_preview_order_basket",
+        name="preview_order_basket",
         title="Preview Order Basket",
         description="Preview a basket of explicit orders without placing them.",
         annotations=PREVIEW_TOOL,
         structured_output=True,
     )
-    async def ibkr_preview_order_basket(orders: list[OrderSpec]) -> OrderBasketPreviewResponse:
+    async def preview_order_basket(orders: list[OrderSpec]) -> OrderBasketPreviewResponse:
         if not orders:
             raise MCPToolError("VALIDATION_ERROR", "orders must contain at least one order")
 
@@ -878,7 +878,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         )
 
     @mcp.tool(
-        name="ibkr_create_trade_intent",
+        name="create_trade_intent",
         title="Create Trade Intent",
         description=(
             "Create or return an idempotent basket-style trade intent from explicit orders. "
@@ -887,7 +887,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         annotations=IDEMPOTENT_WRITE_TOOL,
         structured_output=True,
     )
-    async def ibkr_create_trade_intent(
+    async def create_trade_intent(
         orders: list[OrderSpec],
         reason: str,
         account_id: Optional[str] = None,
@@ -931,7 +931,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         return _trade_intent_response(record)
 
     @mcp.tool(
-        name="ibkr_request_trade_intent_approval",
+        name="request_trade_intent_approval",
         title="Request Trade Intent Approval",
         description=(
             "Request a single Telegram approval covering a persisted trade intent. "
@@ -940,7 +940,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         annotations=ToolAnnotations(destructiveHint=False, openWorldHint=True),
         structured_output=True,
     )
-    async def ibkr_request_trade_intent_approval(intent_id: str) -> ApprovalStatusResponse:
+    async def request_trade_intent_approval(intent_id: str) -> ApprovalStatusResponse:
         record = get_trade_intent(intent_id)
         if record is None:
             raise MCPToolError("NOT_FOUND", f"Trade intent '{intent_id}' not found.")
@@ -996,7 +996,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         return _approval_response_from_record(latest)
 
     @mcp.tool(
-        name="ibkr_submit_trade_intent",
+        name="submit_trade_intent",
         title="Submit Trade Intent",
         description=(
             "Submit the planned orders in a persisted trade intent. "
@@ -1005,7 +1005,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         annotations=IDEMPOTENT_WRITE_TOOL,
         structured_output=True,
     )
-    async def ibkr_submit_trade_intent(
+    async def submit_trade_intent(
         intent_id: str,
         approval_id: Optional[str] = None,
     ) -> TradeIntentResponse:
@@ -1062,26 +1062,26 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         return _trade_intent_response(refreshed)
 
     @mcp.tool(
-        name="ibkr_get_trade_intent",
+        name="get_trade_intent",
         title="Get Trade Intent",
         description="Fetch the persisted state of a trade intent and its orders.",
         annotations=READ_TOOL,
         structured_output=True,
     )
-    async def ibkr_get_trade_intent(intent_id: str) -> TradeIntentResponse:
+    async def get_trade_intent(intent_id: str) -> TradeIntentResponse:
         record = get_trade_intent(intent_id)
         if record is None:
             raise MCPToolError("NOT_FOUND", f"Trade intent '{intent_id}' not found.")
         return _trade_intent_response(record)
 
     @mcp.tool(
-        name="ibkr_list_trade_intents",
+        name="list_trade_intents",
         title="List Trade Intents",
         description="List recent persisted trade intents with optional status filtering.",
         annotations=READ_TOOL,
         structured_output=True,
     )
-    async def ibkr_list_trade_intents(
+    async def list_trade_intents(
         status: Optional[str] = None,
         limit: int = 50,
     ) -> TradeIntentListResponse:
@@ -1090,13 +1090,13 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         return TradeIntentListResponse(count=len(intents), intents=intents)
 
     @mcp.tool(
-        name="ibkr_reconcile_trade_intent",
+        name="reconcile_trade_intent",
         title="Reconcile Trade Intent",
         description="Refresh a trade intent against current broker order status and positions.",
         annotations=READ_TOOL,
         structured_output=True,
     )
-    async def ibkr_reconcile_trade_intent(intent_id: str) -> TradeIntentResponse:
+    async def reconcile_trade_intent(intent_id: str) -> TradeIntentResponse:
         record = get_trade_intent(intent_id)
         if record is None:
             raise MCPToolError("NOT_FOUND", f"Trade intent '{intent_id}' not found.")
@@ -1150,13 +1150,13 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         return _trade_intent_response(refreshed)
 
     @mcp.tool(
-        name="ibkr_cancel_trade_intent",
+        name="cancel_trade_intent",
         title="Cancel Trade Intent",
         description="Cancel all active broker orders associated with a trade intent.",
         annotations=WRITE_TOOL,
         structured_output=True,
     )
-    async def ibkr_cancel_trade_intent(intent_id: str) -> CancelTradeIntentResponse:
+    async def cancel_trade_intent(intent_id: str) -> CancelTradeIntentResponse:
         record = get_trade_intent(intent_id)
         if record is None:
             raise MCPToolError("NOT_FOUND", f"Trade intent '{intent_id}' not found.")
@@ -1200,7 +1200,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         )
 
     @mcp.tool(
-        name="ibkr_get_option_chain",
+        name="get_option_chain",
         title="Get Option Chain",
         description=(
             "Discover single-leg option contracts for an underlying and return a bounded "
@@ -1209,7 +1209,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         annotations=READ_TOOL,
         structured_output=True,
     )
-    async def ibkr_get_option_chain(
+    async def get_option_chain(
         underlying: SymbolSpec,
         expiries: Optional[list[str]] = None,
         expiry_start: Optional[str] = None,
@@ -1238,13 +1238,13 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         )
 
     @mcp.tool(
-        name="ibkr_get_option_snapshot",
+        name="get_option_snapshot",
         title="Get Option Snapshot",
         description="Get quote, volatility, and greeks for a fully specified single-leg option.",
         annotations=READ_TOOL,
         structured_output=True,
     )
-    async def ibkr_get_option_snapshot(instrument: SymbolSpec) -> OptionSnapshotResponse:
+    async def get_option_snapshot(instrument: SymbolSpec) -> OptionSnapshotResponse:
         _ensure_fully_qualified_option(instrument)
         return await call_core(lambda client: get_option_snapshot(instrument, client))
 
@@ -1253,7 +1253,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
     # -----------------------------------------------------------------------
 
     @mcp.tool(
-        name="ibkr_notify",
+        name="notify",
         title="Send Telegram Notification",
         description=(
             "Send an informational notification to the operator via Telegram. "
@@ -1262,7 +1262,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         annotations=ToolAnnotations(destructiveHint=False, openWorldHint=True),
         structured_output=True,
     )
-    async def ibkr_notify(
+    async def notify(
         title: str,
         body: str,
         level: str = "info",
@@ -1283,7 +1283,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         )
 
     @mcp.tool(
-        name="ibkr_request_trade_approval",
+        name="request_trade_approval",
         title="Request Trade Approval",
         description=(
             "Send a trade approval request to the operator via Telegram. "
@@ -1294,7 +1294,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         annotations=ToolAnnotations(destructiveHint=False, openWorldHint=True),
         structured_output=True,
     )
-    async def ibkr_request_trade_approval(
+    async def request_trade_approval(
         order: OrderSpec,
         reason: str,
         preview: Optional[OrderPreview] = None,
@@ -1332,7 +1332,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         return _approval_response_from_record(get_approval(approval_id) or rec)
 
     @mcp.tool(
-        name="ibkr_request_environment_change",
+        name="request_environment_change",
         title="Request Environment Change",
         description=(
             "Send a request to the operator via Telegram to switch the IBKR connection "
@@ -1345,7 +1345,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         annotations=ToolAnnotations(destructiveHint=False, openWorldHint=True),
         structured_output=True,
     )
-    async def ibkr_request_environment_change(target_env: str, reason: str) -> ApprovalStatusResponse:
+    async def request_environment_change(target_env: str, reason: str) -> ApprovalStatusResponse:
         if target_env not in ("live", "paper"):
             raise ValueError("target_env must be 'live' or 'paper'")
 
@@ -1383,7 +1383,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         return _approval_response_from_record(get_approval(approval_id) or rec)
 
     @mcp.tool(
-        name="ibkr_execute_environment_change",
+        name="execute_environment_change",
         title="Execute Environment Change",
         description=(
             "Apply an approved environment change. Provide the approval_id from "
@@ -1394,7 +1394,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         annotations=WRITE_TOOL,
         structured_output=True,
     )
-    async def ibkr_execute_environment_change(approval_id: str, target_env: str) -> Dict[str, Any]:
+    async def execute_environment_change(approval_id: str, target_env: str) -> Dict[str, Any]:
         if target_env not in ("live", "paper"):
             raise ValueError("target_env must be 'live' or 'paper'")
             
@@ -1453,7 +1453,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         }
 
     @mcp.tool(
-        name="ibkr_check_approval_status",
+        name="check_approval_status",
         title="Check Approval Status",
         description=(
             "Poll the status of a pending trade, trade-intent, or execution-unlock approval. "
@@ -1462,7 +1462,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         annotations=READ_TOOL,
         structured_output=True,
     )
-    async def ibkr_check_approval_status(approval_id: str) -> ApprovalStatusResponse:
+    async def check_approval_status(approval_id: str) -> ApprovalStatusResponse:
         rec = get_approval(approval_id)
         if rec is None:
             raise MCPToolError("NOT_FOUND", f"Approval '{approval_id}' not found.")
@@ -1473,7 +1473,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
     # -----------------------------------------------------------------------
 
     @mcp.tool(
-        name="ibkr_assess_order_impact",
+        name="assess_order_impact",
         title="Assess Order Impact",
         description=(
             "Compute portfolio-level impact of a proposed order: concentration change, "
@@ -1483,7 +1483,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         annotations=READ_TOOL,
         structured_output=True,
     )
-    async def ibkr_assess_order_impact(
+    async def assess_order_impact(
         order: OrderSpec,
         preview: Optional[OrderPreview] = None,
         account_id: Optional[str] = None,
@@ -1514,7 +1514,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         return OrderImpactResponse(**result)
 
     @mcp.tool(
-        name="ibkr_get_portfolio_risk",
+        name="get_portfolio_risk",
         title="Get Portfolio Risk",
         description=(
             "Compute portfolio-wide risk metrics: margin utilisation, "
@@ -1523,7 +1523,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         annotations=READ_TOOL,
         structured_output=True,
     )
-    async def ibkr_get_portfolio_risk(account_id: Optional[str] = None) -> PortfolioRiskResponse:
+    async def get_portfolio_risk(account_id: Optional[str] = None) -> PortfolioRiskResponse:
         def operation(client):
             from ibkr_core.account import get_account_summary, get_positions
 
@@ -1540,7 +1540,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         return PortfolioRiskResponse(**result)
 
     @mcp.tool(
-        name="ibkr_check_position_limits",
+        name="check_position_limits",
         title="Check Position Limits",
         description=(
             "Validate a proposed order against the active agent profile's position limits. "
@@ -1549,7 +1549,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         annotations=READ_TOOL,
         structured_output=True,
     )
-    async def ibkr_check_position_limits(
+    async def check_position_limits(
         order: OrderSpec,
         profile_id: Optional[str] = None,
         account_id: Optional[str] = None,
@@ -1584,7 +1584,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
     # -----------------------------------------------------------------------
 
     @mcp.tool(
-        name="ibkr_get_agent_profile",
+        name="get_agent_profile",
         title="Get Agent Profile",
         description=(
             "Load and return the active agent trading profile with its constraints. "
@@ -1593,7 +1593,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         annotations=READ_TOOL,
         structured_output=True,
     )
-    async def ibkr_get_agent_profile(
+    async def get_agent_profile(
         profile_id: Optional[str] = None,
     ) -> AgentProfileResponse:
         profile = load_profile(profile_id or config.agent_profile_id)
@@ -1618,7 +1618,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         )
 
     @mcp.tool(
-        name="ibkr_validate_against_profile",
+        name="validate_against_profile",
         title="Validate Against Profile",
         description=(
             "Check a proposed order against the agent's trading profile constraints. "
@@ -1627,7 +1627,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         annotations=READ_TOOL,
         structured_output=True,
     )
-    async def ibkr_validate_against_profile(
+    async def validate_against_profile(
         order: OrderSpec,
         profile_id: Optional[str] = None,
         account_id: Optional[str] = None,
@@ -1666,7 +1666,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
     # -----------------------------------------------------------------------
 
     @mcp.tool(
-        name="ibkr_get_session_activity",
+        name="get_session_activity",
         title="Get Session Activity",
         description=(
             "Summarise trading activity for today's session: orders placed, filled, "
@@ -1675,7 +1675,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         annotations=READ_TOOL,
         structured_output=True,
     )
-    async def ibkr_get_session_activity() -> SessionActivityResponse:
+    async def get_session_activity() -> SessionActivityResponse:
         from ibkr_core.persistence import get_db_path
 
         today = datetime.now(timezone.utc).date().isoformat()
@@ -1733,7 +1733,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         )
 
     @mcp.tool(
-        name="ibkr_get_audit_log",
+        name="get_audit_log",
         title="Get Audit Log",
         description=(
             "Query the SQLite audit log. Filter by event_type, symbol, account_id, "
@@ -1742,7 +1742,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         annotations=READ_TOOL,
         structured_output=True,
     )
-    async def ibkr_get_audit_log(
+    async def get_audit_log(
         event_type: Optional[str] = None,
         symbol: Optional[str] = None,
         account_id: Optional[str] = None,
@@ -1835,7 +1835,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
     # -----------------------------------------------------------------------
 
     @mcp.tool(
-        name="ibkr_emergency_stop",
+        name="emergency_stop",
         title="Emergency Stop",
         description=(
             "PANIC BUTTON: cancel ALL open orders, disable order placement in control.json, "
@@ -1844,7 +1844,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         annotations=WRITE_TOOL,
         structured_output=True,
     )
-    async def ibkr_emergency_stop(reason: str = "emergency stop") -> EmergencyStopResponse:
+    async def emergency_stop(reason: str = "emergency stop") -> EmergencyStopResponse:
         errors: List[str] = []
         cancelled_ids: List[str] = []
 
@@ -1923,13 +1923,13 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
     if config.enable_admin_tools:
 
         @mcp.tool(
-            name="ibkr_admin_verify_gateway",
+            name="admin_verify_gateway",
             title="Verify Gateway",
             description="Verify the active gateway connection by fetching an account summary.",
             annotations=READ_TOOL,
             structured_output=True,
         )
-        async def ibkr_admin_verify_gateway(
+        async def admin_verify_gateway(
             account_id: Optional[str] = None,
         ) -> GatewayVerificationResponse:
             summary = await call_core(
@@ -1946,7 +1946,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
             )
 
         @mcp.tool(
-            name="ibkr_admin_update_trading_control",
+            name="admin_update_trading_control",
             title="Update Trading Control",
             description=(
                 "Safely update control.json with compare-and-swap semantics. "
@@ -1955,7 +1955,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
             annotations=WRITE_TOOL,
             structured_output=True,
         )
-        async def ibkr_admin_update_trading_control(
+        async def admin_update_trading_control(
             request: TradingControlUpdateRequest,
         ) -> TradingControlUpdateResponse:
             current = load_control()
@@ -2070,7 +2070,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         mime_type="application/json",
     )
     async def resource_default_account_summary() -> str:
-        return _json_payload(await ibkr_get_account_summary())
+        return _json_payload(await get_account_summary())
 
     @mcp.resource(
         "ibkr://account/default/positions",
@@ -2079,7 +2079,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         mime_type="application/json",
     )
     async def resource_default_account_positions() -> str:
-        return _json_payload(await ibkr_get_positions())
+        return _json_payload(await get_positions())
 
     @mcp.resource(
         "ibkr://orders/open",
@@ -2088,7 +2088,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         mime_type="application/json",
     )
     async def resource_open_orders() -> str:
-        return _json_payload(await ibkr_list_open_orders())
+        return _json_payload(await list_open_orders())
 
     @mcp.resource(
         "ibkr://options/chain/{symbol}",
@@ -2099,7 +2099,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         mime_type="application/json",
     )
     async def resource_option_chain(symbol: str) -> str:
-        chain = await ibkr_get_option_chain(
+        chain = await get_option_chain(
             underlying=SymbolSpec(
                 symbol=symbol.upper(),
                 securityType="STK",
