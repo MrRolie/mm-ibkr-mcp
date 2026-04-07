@@ -43,6 +43,19 @@ resolve_uv_bin() {
 
     if [ -n "${SUDO_USER:-}" ]; then
         local sudo_home
+        local sudo_user_uv
+
+        # Check uv using the invoking user's login shell PATH. This catches
+        # user-local installs (for example snap-managed paths) that root
+        # cannot discover with command -v.
+        if command -v sudo >/dev/null 2>&1; then
+            sudo_user_uv="$(sudo -Hiu "${SUDO_USER}" sh -lc 'command -v uv 2>/dev/null' | tr -d '\r\n' || true)"
+            if [ -n "${sudo_user_uv}" ] && [ -x "${sudo_user_uv}" ]; then
+                UV_BIN="${sudo_user_uv}"
+                return 0
+            fi
+        fi
+
         sudo_home="$(getent passwd "${SUDO_USER}" | cut -d: -f6)"
         if [ -n "${sudo_home}" ] && [ -x "${sudo_home}/.local/bin/uv" ]; then
             UV_BIN="${sudo_home}/.local/bin/uv"
