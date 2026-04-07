@@ -21,12 +21,12 @@ def format_trade_approval(
     limit_price = order_data.get("limitPrice")
     client_order_id = order_data.get("clientOrderId", "")
 
-    price_str = f" @ ${limit_price:,.4f}" if limit_price else ""
+    price_str = _escape(f" @ ${limit_price:,.4f}") if limit_price else ""
     lines: List[str] = [
         "🔔 *TRADE APPROVAL REQUEST*",
         "",
-        f"*Instrument:* `{symbol}` \\({sec_type}\\)",
-        f"*Action:* {side} {qty} × {order_type}{price_str}",
+        f"*Instrument:* `{symbol}` \\({_escape(sec_type)}\\)",
+        f"*Action:* {_escape(side)} {_escape(qty)} × {_escape(order_type)}{price_str}",
     ]
 
     if client_order_id:
@@ -38,14 +38,14 @@ def format_trade_approval(
         warnings: List[str] = preview_data.get("warnings", [])
 
         if notional:
-            lines.append(f"*Est\\. Notional:* ${notional:,.2f}")
+            lines.append(f"*Est\\. Notional:* {_escape(f"${notional:,.2f}")}")
         if commission:
-            lines.append(f"*Est\\. Commission:* ${commission:.2f}")
+            lines.append(f"*Est\\. Commission:* {_escape(f"${commission:.2f}")}")
         if warnings:
             lines.append("")
             lines.append("⚠️ *Warnings:*")
             for w in warnings[:3]:
-                lines.append(f"  • {w}")
+                lines.append(f"  • {_escape(w)}")
 
     lines += [
         "",
@@ -68,7 +68,7 @@ def format_trade_intent_approval(
         "🔔 *TRADE INTENT APPROVAL REQUEST*",
         "",
         f"*Intent ID:* `{intent_id}`",
-        f"*Order Count:* {len(orders_data)}",
+        f"*Order Count:* {_escape(len(orders_data))}",
         f"*Reason:* {_escape(reason)}",
         f"*Approval ID:* `{approval_id}`",
         "",
@@ -83,14 +83,14 @@ def format_trade_intent_approval(
         order_type = order.get("orderType", "MKT")
         limit_price = order.get("limitPrice")
         client_order_id = order.get("clientOrderId")
-        price_str = f" @ ${limit_price:,.4f}" if limit_price else ""
-        line = f"• `{symbol}` {side} {qty} × {order_type}{price_str}"
+        price_str = _escape(f" @ ${limit_price:,.4f}") if limit_price else ""
+        line = f"• `{symbol}` {_escape(side)} {_escape(qty)} × {_escape(order_type)}{price_str}"
         if client_order_id:
             line += f" \\(`{client_order_id}`\\)"
         lines.append(line)
 
     if len(orders_data) > 8:
-        lines.append(f"• \\+{len(orders_data) - 8} more orders")
+        lines.append(f"• \\+{_escape(len(orders_data) - 8)} more orders")
 
     lines += [
         "",
@@ -125,7 +125,7 @@ def format_environment_change(approval_id: str, target_env: str, reason: str, po
         f"*Reason:* {_escape(reason)}",
         f"*Approval ID:* `{approval_id}`",
         "",
-        "⚠️ *Safety lock will be applied: orders will be disabled and dry-run enabled\\.*",
+        "⚠️ *Safety lock will be applied: orders will be disabled and dry\\-run enabled\\.*",
         "",
         "Tap a button to respond:",
     ])
@@ -147,7 +147,7 @@ def format_emergency_stop(orders_cancelled: int, account_id: str) -> str:
         "🛑 *EMERGENCY STOP EXECUTED*",
         "",
         f"*Account:* `{account_id}`",
-        f"*Orders cancelled:* {orders_cancelled}",
+        f"*Orders cancelled:* {_escape(orders_cancelled)}",
         "*Trading:* ❌ Orders disabled",
         "",
         "The gateway is halted\\. Re\\-enable trading manually after reviewing positions\\.",

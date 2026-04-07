@@ -17,9 +17,9 @@ from mcp.types import ToolAnnotations
 
 from ibkr_core.account import (
     AccountError,
-    get_account_summary,
+    get_account_summary as core_get_account_summary,
     get_pnl,
-    get_positions,
+    get_positions as core_get_positions,
 )
 from ibkr_core.client import ConnectionError as IBKRConnectionError
 from ibkr_core.config import InvalidConfigError, ensure_runtime_files, get_config, reset_config
@@ -491,7 +491,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
             "1. ibkr_health + ibkr_get_trading_status + ibkr_get_schedule_status — verify "
             "connectivity and runtime safety.\n"
             "2. If needed, ibkr_request_environment_change to switch between live and paper. "
-            "Once approved, call ibkr_execute_environment_change.\n"
+            "Once approved, use the ibkr_execute_environment_change tool.\n"
             "3. ibkr_get_account_summary + ibkr_get_positions + ibkr_get_portfolio_risk — "
             "understand the account before trading.\n"
             "3. ibkr_resolve_contract, ibkr_get_quote, ibkr_get_historical_bars, and the "
@@ -580,13 +580,13 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
 
     async def get_positions_model(account_id: Optional[str] = None) -> PositionsResponse:
         def operation(client):
-            positions = get_positions(client, account_id=account_id)
+            positions = core_get_positions(client, account_id=account_id)
             if account_id:
                 resolved_account_id = account_id
             elif positions:
                 resolved_account_id = positions[0].accountId
             else:
-                resolved_account_id = get_account_summary(client, account_id=None).accountId
+                resolved_account_id = core_get_account_summary(client, account_id=None).accountId
             return resolved_account_id, positions
 
         resolved_account_id, positions = await call_core(operation)
@@ -685,7 +685,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         structured_output=True,
     )
     async def get_account_summary(account_id: Optional[str] = None) -> AccountSummary:
-        return await call_core(lambda client: get_account_summary(client, account_id=account_id))
+        return await call_core(lambda client: core_get_account_summary(client, account_id=account_id))
 
     @mcp.tool(
         name="get_positions",
@@ -1125,10 +1125,10 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
 
         try:
             summary = await call_core(
-                lambda client: get_account_summary(client, account_id=record.account_id)
+                lambda client: core_get_account_summary(client, account_id=record.account_id)
             )
             positions = await call_core(
-                lambda client: get_positions(client, account_id=record.account_id)
+                lambda client: core_get_positions(client, account_id=record.account_id)
             )
             record_position_snapshot(
                 account_id=summary.accountId,
@@ -1338,7 +1338,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
             "Send a request to the operator via Telegram to switch the IBKR connection "
             "between 'live' (real-money) and 'paper' (simulated) environments. "
             "Returns an approval_id — poll ibkr_check_approval_status until resolved. "
-            "Once approved, you MUST call ibkr_execute_environment_change with the approval_id "
+            "Once approved, you MUST use the ibkr_execute_environment_change tool with the approval_id "
             "to actually apply the change. Switching environments will automatically engage "
             "safety locks (orders disabled, dry-run enabled)."
         ),
@@ -1491,11 +1491,10 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         _ensure_fully_qualified_option(order.instrument)
 
         def operation(client):
-            from ibkr_core.account import get_account_summary, get_positions
             from ibkr_core.market_data import get_quote
 
-            summary = get_account_summary(client, account_id=account_id)
-            positions = get_positions(client, account_id=account_id)
+            summary = core_get_account_summary(client, account_id=account_id)
+            positions = core_get_positions(client, account_id=account_id)
             quote = None
             try:
                 quote = get_quote(order.instrument, client)
@@ -1525,11 +1524,9 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
     )
     async def get_portfolio_risk(account_id: Optional[str] = None) -> PortfolioRiskResponse:
         def operation(client):
-            from ibkr_core.account import get_account_summary, get_positions
-
             return (
-                get_account_summary(client, account_id=account_id),
-                get_positions(client, account_id=account_id),
+                core_get_account_summary(client, account_id=account_id),
+                core_get_positions(client, account_id=account_id),
             )
 
         summary, positions = await call_core(operation)
@@ -1558,11 +1555,9 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         profile = load_profile(profile_id or config.agent_profile_id)
 
         def operation(client):
-            from ibkr_core.account import get_account_summary, get_positions
-
             return (
-                get_account_summary(client, account_id=account_id),
-                get_positions(client, account_id=account_id),
+                core_get_account_summary(client, account_id=account_id),
+                core_get_positions(client, account_id=account_id),
             )
 
         summary, positions = await call_core(operation)
@@ -1636,11 +1631,9 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         profile = load_profile(profile_id or config.agent_profile_id)
 
         def operation(client):
-            from ibkr_core.account import get_account_summary, get_positions
-
             return (
-                get_account_summary(client, account_id=account_id),
-                get_positions(client, account_id=account_id),
+                core_get_account_summary(client, account_id=account_id),
+                core_get_positions(client, account_id=account_id),
             )
 
         summary, positions = await call_core(operation)
@@ -1892,7 +1885,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         tg_notified = False
         account_id = "unknown"
         try:
-            summary = await call_core(lambda client: get_account_summary(client))
+            summary = await call_core(lambda client: core_get_account_summary(client))
             account_id = summary.accountId
         except Exception:
             pass
@@ -1933,7 +1926,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
             account_id: Optional[str] = None,
         ) -> GatewayVerificationResponse:
             summary = await call_core(
-                lambda client: get_account_summary(client, account_id=account_id)
+                lambda client: core_get_account_summary(client, account_id=account_id)
             )
             return GatewayVerificationResponse(
                 success=True,
@@ -2122,7 +2115,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
             "1. ibkr_health + ibkr_get_trading_status + ibkr_get_schedule_status — verify "
             "connectivity and runtime safety.\n"
             "2. If needed, ibkr_request_environment_change to switch between live and paper. "
-            "Once approved, call ibkr_execute_environment_change.\n"
+            "Once approved, use the ibkr_execute_environment_change tool.\n"
             "3. ibkr_get_agent_profile — review trading constraints for this session.\n"
             "4. ibkr_get_portfolio_risk — understand current portfolio exposure.\n"
             "4. ibkr_resolve_contract — fully qualify the instrument.\n"
@@ -2132,7 +2125,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
             "7. ibkr_assess_order_impact — compute concentration and buying-power impact.\n"
             "8. ibkr_validate_against_profile — confirm the order is within profile limits.\n"
             "9. For a single order: request approval only when "
-            "MCP_ORDER_APPROVAL_MODE=telegram, then call ibkr_place_order.\n"
+            "MCP_ORDER_APPROVAL_MODE=telegram, then use the ibkr_place_order tool.\n"
             "10. For a basket: ibkr_create_trade_intent, request approval only when "
             "MCP_ORDER_APPROVAL_MODE=telegram, then ibkr_submit_trade_intent.\n"
             "11. After submission, use ibkr_get_order_status or "

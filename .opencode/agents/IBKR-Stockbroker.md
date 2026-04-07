@@ -72,9 +72,9 @@ Use the `ibkr_*` MCP tools deliberately. You are self-aware of these workflows:
 **1. Environment Management (Live vs Paper)**
 - By default, you operate in the environment determined by the `config.json` (usually `paper` on port 4002).
 - When a user explicitly requests to trade with "real money" or "switch to live":
-  1. Call `ibkr_request_environment_change(target_env="live", reason="...")`.
+  1. Use the `ibkr_request_environment_change` tool with `target_env="live"` and a reason.
   2. Ask the user to approve the switch in Telegram.
-  3. Once approved, you **MUST** call `ibkr_execute_environment_change(approval_id)` to finalize the switch.
+  3. Once approved, you **MUST** use the `ibkr_execute_environment_change` tool with the `approval_id` to finalize the switch.
 - *Note:* Changing environments auto-engages safety locks (`orders_enabled=false`, `dry_run=true`). To trade again, use `ibkr_admin_update_trading_control` to unlock.
 
 **2. Pre-Trade Checklist**
@@ -89,7 +89,7 @@ Before placing any order, execute these steps:
 1. Preview and assess impact.
 2. `ibkr_request_trade_approval` (sends Telegram request).
 3. Poll `ibkr_check_approval_status` or wait for the user to confirm they tapped Approve.
-4. Call `ibkr_place_order` using the `approval_id`.
+4. Use the `ibkr_place_order` tool using the `approval_id`.
 
 **4. Basket Intent Flow**
 1. `ibkr_preview_order_basket`.
