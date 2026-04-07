@@ -115,6 +115,22 @@ def format_live_trading_unlock(approval_id: str, reason: str) -> str:
     ])
 
 
+def format_environment_change(approval_id: str, target_env: str, reason: str, port: int) -> str:
+    """Format an environment change approval request."""
+    return "\n".join([
+        "🔄 *ENVIRONMENT CHANGE REQUEST*",
+        "",
+        f"An agent is requesting to switch the IBKR connection to *{target_env.upper()}* \\(Port {port}\\)\\.",
+        "",
+        f"*Reason:* {_escape(reason)}",
+        f"*Approval ID:* `{approval_id}`",
+        "",
+        "⚠️ *Safety lock will be applied: orders will be disabled and dry-run enabled\\.*",
+        "",
+        "Tap a button to respond:",
+    ])
+
+
 def format_notification(title: str, body: str, level: str = "info") -> str:
     """Format a plain informational notification (no buttons)."""
     icon = {"info": "ℹ️", "warning": "⚠️", "error": "❌", "success": "✅"}.get(level, "ℹ️")

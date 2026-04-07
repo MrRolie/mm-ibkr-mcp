@@ -42,6 +42,8 @@ class Config:
 
     ibkr_host: str
     ibkr_port: int
+    ibkr_live_port: int
+    ibkr_paper_port: int
     ibkr_client_id: int
     default_account_id: Optional[str]
     trading_mode: str
@@ -116,6 +118,8 @@ def load_config() -> Config:
     config = Config(
         ibkr_host=runtime.ibkr_host,
         ibkr_port=runtime.ibkr_port,
+        ibkr_live_port=runtime.ibkr_live_port,
+        ibkr_paper_port=runtime.ibkr_paper_port,
         ibkr_client_id=runtime.ibkr_client_id,
         default_account_id=runtime.default_account_id,
         trading_mode=control_state.trading_mode,

@@ -39,6 +39,8 @@ def _default_config() -> Dict[str, Any]:
         "schema_version": SCHEMA_VERSION,
         "ibkr_host": "127.0.0.1",
         "ibkr_port": 4002,
+        "ibkr_live_port": int(os.environ.get("MM_IBKR_LIVE_PORT", "4001")),
+        "ibkr_paper_port": int(os.environ.get("MM_IBKR_PAPER_PORT", "4002")),
         "ibkr_client_id": 1,
         "default_account_id": None,
         "log_level": "INFO",
@@ -94,6 +96,8 @@ def _normalize_config(raw: Dict[str, Any]) -> Dict[str, Any]:
         raw.get("ibkr_port"),
         _coerce_int(raw.get("paper_gateway_port"), defaults["ibkr_port"]),
     )
+    merged["ibkr_live_port"] = _coerce_int(raw.get("ibkr_live_port"), defaults["ibkr_live_port"])
+    merged["ibkr_paper_port"] = _coerce_int(raw.get("ibkr_paper_port"), defaults["ibkr_paper_port"])
     merged["ibkr_client_id"] = _coerce_int(
         raw.get("ibkr_client_id"),
         _coerce_int(raw.get("paper_client_id"), defaults["ibkr_client_id"]),
@@ -169,6 +173,8 @@ class RuntimeConfig:
     schema_version: int
     ibkr_host: str
     ibkr_port: int
+    ibkr_live_port: int
+    ibkr_paper_port: int
     ibkr_client_id: int
     default_account_id: Optional[str]
     log_level: str
@@ -190,6 +196,8 @@ def load_runtime_config(create_if_missing: bool = False) -> RuntimeConfig:
         schema_version=data["schema_version"],
         ibkr_host=data["ibkr_host"],
         ibkr_port=data["ibkr_port"],
+        ibkr_live_port=data["ibkr_live_port"],
+        ibkr_paper_port=data["ibkr_paper_port"],
         ibkr_client_id=data["ibkr_client_id"],
         default_account_id=data["default_account_id"],
         log_level=data["log_level"],

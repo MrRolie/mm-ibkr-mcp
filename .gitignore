@@ -1,9 +1,7 @@
 # Additional files to ignore
-.claude/
 .vscode/
 .benchmarks/
 data/
-AGENTS.md
 
 # Secrets and credentials
 secrets/

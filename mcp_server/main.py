@@ -130,7 +130,7 @@ from mcp_server.telegram.approval import (
 from mcp_server.telegram.config import TelegramConfig
 from mcp_server.telegram.notifications import (
     format_emergency_stop,
-    format_live_trading_unlock,
+    format_environment_change,
     format_notification,
     format_trade_approval,
     format_trade_intent_approval,
@@ -490,7 +490,9 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
             "Canonical workflow:\n"
             "1. ibkr_health + ibkr_get_trading_status + ibkr_get_schedule_status — verify "
             "connectivity and runtime safety.\n"
-            "2. ibkr_get_account_summary + ibkr_get_positions + ibkr_get_portfolio_risk — "
+            "2. If needed, ibkr_request_environment_change to switch between live and paper. "
+            "Once approved, call ibkr_execute_environment_change.\n"
+            "3. ibkr_get_account_summary + ibkr_get_positions + ibkr_get_portfolio_risk — "
             "understand the account before trading.\n"
             "3. ibkr_resolve_contract, ibkr_get_quote, ibkr_get_historical_bars, and the "
             "options tools — fully qualify and inspect the instrument.\n"
@@ -1330,24 +1332,29 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         return _approval_response_from_record(get_approval(approval_id) or rec)
 
     @mcp.tool(
-        name="ibkr_request_live_trading_unlock",
-        title="Request Live Trading Unlock",
+        name="ibkr_request_environment_change",
+        title="Request Environment Change",
         description=(
-            "Send a real-order execution unlock request to the operator via Telegram. "
+            "Send a request to the operator via Telegram to switch the IBKR connection "
+            "between 'live' (real-money) and 'paper' (simulated) environments. "
             "Returns an approval_id — poll ibkr_check_approval_status until resolved. "
-            "This is mainly useful before changing control.json from dry-run into "
-            "real-order mode."
+            "Once approved, you MUST call ibkr_execute_environment_change with the approval_id "
+            "to actually apply the change. Switching environments will automatically engage "
+            "safety locks (orders disabled, dry-run enabled)."
         ),
         annotations=ToolAnnotations(destructiveHint=False, openWorldHint=True),
         structured_output=True,
     )
-    async def ibkr_request_live_trading_unlock(reason: str) -> ApprovalStatusResponse:
+    async def ibkr_request_environment_change(target_env: str, reason: str) -> ApprovalStatusResponse:
+        if target_env not in ("live", "paper"):
+            raise ValueError("target_env must be 'live' or 'paper'")
+
         timeout = telegram_cfg.live_unlock_timeout_seconds if telegram_cfg else 120
 
         if not config.approval_requires_telegram:
             rec = create_resolved_approval(
-                "live_trading",
-                {"reason": reason},
+                "environment_change",
+                {"reason": reason, "target_env": target_env},
                 status="approved",
                 resolve_note="Auto-approved because MCP_ORDER_APPROVAL_MODE=yolo",
             )
@@ -1356,20 +1363,94 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         _ensure_telegram_ready(config, telegram_cfg, telegram_app)
 
         rec = create_approval(
-            "live_trading",
-            {"reason": reason},
+            "environment_change",
+            {"reason": reason, "target_env": target_env},
             timeout_seconds=timeout,
         )
         approval_id = rec["approval_id"]
 
         if telegram_app is not None and telegram_cfg is not None:
             from mcp_server.telegram.bot import send_approval_request
-
-            text = format_live_trading_unlock(approval_id, reason)
+            
+            runtime = get_config()
+            target_port = runtime.ibkr_live_port if target_env == "live" else runtime.ibkr_paper_port
+            
+            from mcp_server.telegram.notifications import format_environment_change
+            text = format_environment_change(approval_id, target_env, reason, target_port)
             msg_id = await send_approval_request(telegram_app, telegram_cfg, approval_id, text)
             if msg_id:
                 set_telegram_message_id(approval_id, msg_id)
         return _approval_response_from_record(get_approval(approval_id) or rec)
+
+    @mcp.tool(
+        name="ibkr_execute_environment_change",
+        title="Execute Environment Change",
+        description=(
+            "Apply an approved environment change. Provide the approval_id from "
+            "ibkr_request_environment_change. This applies safety locks to control.json "
+            "and switches the active connection port in config.json. The connection "
+            "will automatically reconnect on the next tool call."
+        ),
+        annotations=WRITE_TOOL,
+        structured_output=True,
+    )
+    async def ibkr_execute_environment_change(approval_id: str, target_env: str) -> Dict[str, Any]:
+        if target_env not in ("live", "paper"):
+            raise ValueError("target_env must be 'live' or 'paper'")
+            
+        rec = get_approval(approval_id)
+        if not rec:
+            raise MCPToolError("NOT_FOUND", f"Approval '{approval_id}' not found.")
+        
+        status = rec["status"]
+        if status != "approved":
+            raise MCPToolError("INVALID_STATE", f"Approval is not in 'approved' state: {status}")
+            
+        approval_type = rec["approval_type"]
+        if approval_type != "environment_change":
+            raise MCPToolError("INVALID_STATE", f"Expected environment_change approval, got {approval_type}")
+            
+        request_data = rec["request_data"]
+        approved_target = request_data.get("target_env")
+        if approved_target != target_env:
+            raise MCPToolError("INVALID_STATE", f"Approval was for {approved_target}, but tool called for {target_env}")
+
+        # 1. Engage Safety Locks (control.json)
+        current_control = load_control()
+        updated_control = replace(
+            current_control,
+            orders_enabled=False,
+            dry_run=True,
+            block_reason=f"Safety lock engaged after environment switch to {target_env}",
+            updated_by="mcp-server-env-switch"
+        )
+        write_control(updated_control)
+        write_audit_entry(
+            "env_switch_safety_lock",
+            reason=f"Switched to {target_env}",
+            approval_id=approval_id
+        )
+
+        # 2. Update Environment / Port (config.json)
+        runtime = get_config()
+        target_port = runtime.ibkr_live_port if target_env == "live" else runtime.ibkr_paper_port
+        
+        from ibkr_core.runtime_config import update_config_data
+        update_config_data({"ibkr_port": target_port})
+        
+        # 3. Mark approval as used
+        mark_used(approval_id)
+        
+        # 4. Invalidate current client to force reconnect
+        await service.invalidate_client()
+
+        return {
+            "success": True,
+            "targetEnv": target_env,
+            "newPort": target_port,
+            "safetyLocked": True,
+            "message": "Environment changed successfully. Safety locks engaged (orders disabled, dry-run enabled). The next IBKR operation will use the new connection."
+        }
 
     @mcp.tool(
         name="ibkr_check_approval_status",
@@ -2038,9 +2119,12 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
     def pre_trade_checklist() -> str:
         return (
             "Before placing any order, complete ALL of the following steps:\n"
-            "1. ibkr_get_trading_status + ibkr_get_schedule_status — confirm safe state.\n"
-            "2. ibkr_get_agent_profile — review trading constraints for this session.\n"
-            "3. ibkr_get_portfolio_risk — understand current portfolio exposure.\n"
+            "1. ibkr_health + ibkr_get_trading_status + ibkr_get_schedule_status — verify "
+            "connectivity and runtime safety.\n"
+            "2. If needed, ibkr_request_environment_change to switch between live and paper. "
+            "Once approved, call ibkr_execute_environment_change.\n"
+            "3. ibkr_get_agent_profile — review trading constraints for this session.\n"
+            "4. ibkr_get_portfolio_risk — understand current portfolio exposure.\n"
             "4. ibkr_resolve_contract — fully qualify the instrument.\n"
             "5. For options: ibkr_get_option_chain → ibkr_get_option_snapshot.\n"
             "6. ibkr_preview_order or ibkr_preview_order_basket — estimate execution, "

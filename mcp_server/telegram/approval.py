@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Dict, Literal, Optional
 
 ApprovalStatus = Literal["pending", "approved", "denied", "expired", "used"]
-ApprovalType = Literal["trade", "trade_intent", "live_trading"]
+ApprovalType = Literal["trade", "trade_intent", "live_trading", "environment_change"]
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS approvals (
