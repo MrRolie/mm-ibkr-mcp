@@ -155,7 +155,10 @@ Basket execution:
 
 Approval and safety:
 
-- `ibkr_request_trade_approval`
+- `ibkr_request_trade_approval` (Blocks until approved/denied/timeout)
+- `ibkr_request_trade_intent_approval` (Blocks until approved/denied/timeout)
+- `ibkr_request_environment_change` (Blocks until approved/denied/timeout)
+- `ibkr_execute_environment_change`
 - `ibkr_request_live_trading_unlock`
 - `ibkr_check_approval_status`
 - `ibkr_emergency_stop`
