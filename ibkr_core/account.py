@@ -269,11 +269,12 @@ def get_positions(
             # The positions() call gives us basic info; for market values we need portfolio()
             portfolio_items = broker.portfolio(pos.account)
 
-            # Find matching portfolio item for market values
+            # Find matching portfolio item for market values and avg cost
             market_price = 0.0
             market_value = 0.0
             unrealized_pnl = 0.0
             realized_pnl = 0.0
+            item_avg_cost = None
 
             for item in portfolio_items:
                 if item.contract.conId == contract.conId:
@@ -281,7 +282,16 @@ def get_positions(
                     market_value = item.marketValue if item.marketValue else 0.0
                     unrealized_pnl = item.unrealizedPNL if item.unrealizedPNL else 0.0
                     realized_pnl = item.realizedPNL if item.realizedPNL else 0.0
+                    item_avg_cost = item.averageCost if item.averageCost else None
                     break
+
+            # Use portfolio item's averageCost (per-share, split/dividend-adjusted) when available;
+            # fall back to deriving from positions().avgCost which may be stale for corporate actions.
+            avg_price = (
+                item_avg_cost
+                if item_avg_cost is not None
+                else (pos.avgCost / abs(pos.position) if pos.position != 0 else 0.0)
+            )
 
             position = Position(
                 accountId=pos.account,
@@ -290,7 +300,7 @@ def get_positions(
                 assetClass=asset_class,
                 currency=contract.currency or "USD",
                 quantity=pos.position,
-                avgPrice=pos.avgCost / abs(pos.position) if pos.position != 0 else 0.0,
+                avgPrice=avg_price,
                 marketPrice=market_price,
                 marketValue=market_value,
                 unrealizedPnl=unrealized_pnl,

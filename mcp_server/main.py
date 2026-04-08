@@ -18,7 +18,7 @@ from mcp.types import ToolAnnotations
 from ibkr_core.account import (
     AccountError,
     get_account_summary as core_get_account_summary,
-    get_pnl,
+    get_pnl as core_get_pnl,
     get_positions as core_get_positions,
 )
 from ibkr_core.client import ConnectionError as IBKRConnectionError
@@ -37,7 +37,7 @@ from ibkr_core.contracts import (
     ContractNotFoundError,
     ContractResolutionError,
     contract_to_resolved_contract,
-    resolve_contract,
+    resolve_contract as core_resolve_contract,
 )
 from ibkr_core.market_data import (
     MarketDataError,
@@ -45,10 +45,10 @@ from ibkr_core.market_data import (
     MarketDataTimeoutError,
     NoMarketDataError,
     PacingViolationError,
-    get_historical_bars,
-    get_option_chain,
-    get_option_snapshot,
-    get_quote,
+    get_historical_bars as core_get_historical_bars,
+    get_option_chain as core_get_option_chain,
+    get_option_snapshot as core_get_option_snapshot,
+    get_quote as core_get_quote,
 )
 from ibkr_core.models import (
     AccountPnl,
@@ -71,13 +71,13 @@ from ibkr_core.orders import (
     OrderPlacementError,
     OrderPreviewError,
     OrderValidationError,
-    cancel_order,
-    cancel_order_set,
+    cancel_order as core_cancel_order,
+    cancel_order_set as core_cancel_order_set,
     get_open_orders,
-    get_order_set_status,
-    get_order_status,
-    place_order,
-    preview_order,
+    get_order_set_status as core_get_order_set_status,
+    get_order_status as core_get_order_status,
+    place_order as core_place_order,
+    preview_order as core_preview_order,
 )
 from ibkr_core.schedule import get_window_status
 from mcp_server.config import MCPConfig, get_mcp_config
@@ -116,7 +116,7 @@ from mcp_server.models import (
 )
 from mcp_server.profiles.loader import load_profile, list_profiles
 from mcp_server.profiles.validator import validate_order_against_profile
-from mcp_server.risk.impact import assess_order_impact
+from mcp_server.risk.impact import assess_order_impact as core_assess_order_impact
 from mcp_server.risk.portfolio import compute_portfolio_risk
 from mcp_server.security import StaticBearerTokenVerifier
 from mcp_server.services import IBKRMCPService
@@ -136,10 +136,10 @@ from mcp_server.telegram.notifications import (
     format_trade_intent_approval,
 )
 from trade_core import (
-    create_trade_intent,
-    get_trade_intent,
+    create_trade_intent as core_create_trade_intent,
+    get_trade_intent as core_get_trade_intent,
     list_trade_intent_order_ids,
-    list_trade_intents,
+    list_trade_intents as core_list_trade_intents,
     record_position_snapshot,
     record_trade_intent_cancellation,
     record_trade_intent_reconcile,
@@ -341,7 +341,7 @@ def _ensure_telegram_ready(
 async def _wait_for_approval_resolution(approval_id: str, timeout_s: float = 50.0) -> dict:
     import time
     import asyncio
-    from ibkr_core.persistence import get_approval
+    from mcp_server.telegram.approval import get_approval
 
     start = time.time()
     while time.time() - start < timeout_s:
@@ -650,7 +650,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
     async def resolve_contract(instrument: SymbolSpec) -> ResolvedContract:
         _ensure_fully_qualified_option(instrument)
         return await call_core(
-            lambda client: contract_to_resolved_contract(resolve_contract(instrument, client))
+            lambda client: contract_to_resolved_contract(core_resolve_contract(instrument, client))
         )
 
     @mcp.tool(
@@ -662,7 +662,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
     )
     async def get_quote(instrument: SymbolSpec) -> Quote:
         _ensure_fully_qualified_option(instrument)
-        return await call_core(lambda client: get_quote(instrument, client))
+        return await call_core(lambda client: core_get_quote(instrument, client))
 
     @mcp.tool(
         name="get_historical_bars",
@@ -680,7 +680,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
     ) -> HistoricalBarsResponse:
         _ensure_fully_qualified_option(instrument)
         bars = await call_core(
-            lambda client: get_historical_bars(
+            lambda client: core_get_historical_bars(
                 instrument,
                 client,
                 bar_size=bar_size,
@@ -723,7 +723,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         timeframe: Optional[str] = None,
     ) -> AccountPnl:
         return await call_core(
-            lambda client: get_pnl(client, account_id=account_id, timeframe=timeframe)
+            lambda client: core_get_pnl(client, account_id=account_id, timeframe=timeframe)
         )
 
     @mcp.tool(
@@ -745,7 +745,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         structured_output=True,
     )
     async def get_order_status(order_id: str) -> OrderStatus:
-        return await call_core(lambda client: get_order_status(client, order_id))
+        return await call_core(lambda client: core_get_order_status(client, order_id))
 
     @mcp.tool(
         name="get_order_set_status",
@@ -757,7 +757,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
     async def get_order_set_status(order_ids: list[str]) -> OrderSetStatusResponse:
         if not order_ids:
             raise MCPToolError("VALIDATION_ERROR", "order_ids must contain at least one order id")
-        found_orders = await call_core(lambda client: get_order_set_status(client, order_ids))
+        found_orders = await call_core(lambda client: core_get_order_set_status(client, order_ids))
         return _order_set_response(order_ids, found_orders)
 
     @mcp.tool(
@@ -769,7 +769,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
     )
     async def preview_order(order: OrderSpec) -> OrderPreview:
         _ensure_fully_qualified_option(order.instrument)
-        return await call_core(lambda client: preview_order(client, order))
+        return await call_core(lambda client: core_preview_order(client, order))
 
     @mcp.tool(
         name="place_order",
@@ -798,7 +798,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
             assert approval_id is not None
             mark_used(approval_id)
 
-        return await call_core(lambda client: place_order(client, order))
+        return await call_core(lambda client: core_place_order(client, order))
 
     @mcp.tool(
         name="cancel_order",
@@ -808,7 +808,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         structured_output=True,
     )
     async def cancel_order(order_id: str) -> CancelResult:
-        return await call_core(lambda client: cancel_order(client, order_id))
+        return await call_core(lambda client: core_cancel_order(client, order_id))
 
     @mcp.tool(
         name="cancel_order_set",
@@ -820,7 +820,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
     async def cancel_order_set(order_ids: list[str]) -> CancelResult:
         if not order_ids:
             raise MCPToolError("VALIDATION_ERROR", "order_ids must contain at least one order id")
-        return await call_core(lambda client: cancel_order_set(client, order_ids))
+        return await call_core(lambda client: core_cancel_order_set(client, order_ids))
 
     @mcp.tool(
         name="preview_order_basket",
@@ -850,7 +850,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
                     "Every basket order must include clientOrderId",
                 )
             try:
-                preview = await call_core(lambda client, current=order: preview_order(client, current))
+                preview = await call_core(lambda client, current=order: core_preview_order(client, current))
                 previewed_count += 1
                 if preview.estimatedNotional is not None:
                     total_notional += float(preview.estimatedNotional)
@@ -921,7 +921,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
                 _ensure_fully_qualified_option(order.instrument)
                 try:
                     preview = await call_core(
-                        lambda client, current=order: preview_order(client, current)
+                        lambda client, current=order: core_preview_order(client, current)
                     )
                 except Exception as exc:
                     logger.warning(
@@ -934,7 +934,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         else:
             previews = [None] * len(orders)
 
-        record = create_trade_intent(
+        record = core_create_trade_intent(
             orders=orders,
             reason=reason,
             account_id=resolved_account_id,
@@ -955,7 +955,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         structured_output=True,
     )
     async def request_trade_intent_approval(intent_id: str) -> ApprovalStatusResponse:
-        record = get_trade_intent(intent_id)
+        record = core_get_trade_intent(intent_id)
         if record is None:
             raise MCPToolError("NOT_FOUND", f"Trade intent '{intent_id}' not found.")
 
@@ -1023,7 +1023,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         intent_id: str,
         approval_id: Optional[str] = None,
     ) -> TradeIntentResponse:
-        record = get_trade_intent(intent_id)
+        record = core_get_trade_intent(intent_id)
         if record is None:
             raise MCPToolError("NOT_FOUND", f"Trade intent '{intent_id}' not found.")
 
@@ -1047,14 +1047,14 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         else:
             update_trade_intent_status(intent_id, status="SUBMITTING")
 
-        latest = get_trade_intent(intent_id)
+        latest = core_get_trade_intent(intent_id)
         assert latest is not None
         for order_info in latest.orders:
             if order_info.status.value != "PLANNED":
                 continue
             try:
                 result = await call_core(
-                    lambda client, current=order_info.order: place_order(client, current)
+                    lambda client, current=order_info.order: core_place_order(client, current)
                 )
             except Exception as exc:
                 tool_error = _tool_error(exc)
@@ -1071,7 +1071,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
                 order_result=result,
             )
 
-        refreshed = get_trade_intent(intent_id)
+        refreshed = core_get_trade_intent(intent_id)
         assert refreshed is not None
         return _trade_intent_response(refreshed)
 
@@ -1083,7 +1083,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         structured_output=True,
     )
     async def get_trade_intent(intent_id: str) -> TradeIntentResponse:
-        record = get_trade_intent(intent_id)
+        record = core_get_trade_intent(intent_id)
         if record is None:
             raise MCPToolError("NOT_FOUND", f"Trade intent '{intent_id}' not found.")
         return _trade_intent_response(record)
@@ -1099,7 +1099,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         status: Optional[str] = None,
         limit: int = 50,
     ) -> TradeIntentListResponse:
-        records = list_trade_intents(status=status.upper() if status else None, limit=limit)
+        records = core_list_trade_intents(status=status.upper() if status else None, limit=limit)
         intents = [_trade_intent_response(record) for record in records]
         return TradeIntentListResponse(count=len(intents), intents=intents)
 
@@ -1111,7 +1111,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         structured_output=True,
     )
     async def reconcile_trade_intent(intent_id: str) -> TradeIntentResponse:
-        record = get_trade_intent(intent_id)
+        record = core_get_trade_intent(intent_id)
         if record is None:
             raise MCPToolError("NOT_FOUND", f"Trade intent '{intent_id}' not found.")
 
@@ -1121,7 +1121,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
                 continue
             try:
                 status = await call_core(
-                    lambda client, current_id=order_info.order_id: get_order_status(client, current_id)
+                    lambda client, current_id=order_info.order_id: core_get_order_status(client, current_id)
                 )
             except Exception as exc:
                 logger.warning(
@@ -1159,7 +1159,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         except Exception as exc:
             logger.warning("Failed to record position snapshot for %s: %s", intent_id, exc)
 
-        refreshed = get_trade_intent(intent_id)
+        refreshed = core_get_trade_intent(intent_id)
         assert refreshed is not None
         return _trade_intent_response(refreshed)
 
@@ -1171,7 +1171,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         structured_output=True,
     )
     async def cancel_trade_intent(intent_id: str) -> CancelTradeIntentResponse:
-        record = get_trade_intent(intent_id)
+        record = core_get_trade_intent(intent_id)
         if record is None:
             raise MCPToolError("NOT_FOUND", f"Trade intent '{intent_id}' not found.")
 
@@ -1184,7 +1184,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
                 continue
             try:
                 result = await call_core(
-                    lambda client, current_id=order_info.order_id: cancel_order(client, current_id)
+                    lambda client, current_id=order_info.order_id: core_cancel_order(client, current_id)
                 )
             except Exception as exc:
                 result = CancelResult(
@@ -1203,7 +1203,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
                 failed_count += 1
             record = updated
 
-        refreshed = get_trade_intent(intent_id)
+        refreshed = core_get_trade_intent(intent_id)
         assert refreshed is not None
         return CancelTradeIntentResponse(
             intentId=intent_id,
@@ -1236,7 +1236,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         option_exchange: Optional[str] = None,
     ) -> OptionChainResponse:
         return await call_core(
-            lambda client: get_option_chain(
+            lambda client: core_get_option_chain(
                 underlying,
                 client,
                 expiries=expiries,
@@ -1260,7 +1260,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
     )
     async def get_option_snapshot(instrument: SymbolSpec) -> OptionSnapshotResponse:
         _ensure_fully_qualified_option(instrument)
-        return await call_core(lambda client: get_option_snapshot(instrument, client))
+        return await call_core(lambda client: core_get_option_snapshot(instrument, client))
 
     # -----------------------------------------------------------------------
     # Telegram human-in-the-loop tools
@@ -1505,13 +1505,13 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         _ensure_fully_qualified_option(order.instrument)
 
         def operation(client):
-            from ibkr_core.market_data import get_quote
+            from ibkr_core.market_data import get_quote as core_get_quote
 
             summary = core_get_account_summary(client, account_id=account_id)
             positions = core_get_positions(client, account_id=account_id)
             quote = None
             try:
-                quote = get_quote(order.instrument, client)
+                quote = core_get_quote(order.instrument, client)
             except Exception:
                 pass
             return summary, positions, quote
@@ -1523,7 +1523,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         positions_data = [p.model_dump(mode="json", exclude_none=True) for p in positions]
         quote_data = quote.model_dump(mode="json", exclude_none=True) if quote else None
 
-        result = assess_order_impact(order_data, preview_data, account_data, positions_data, quote_data)
+        result = core_assess_order_impact(order_data, preview_data, account_data, positions_data, quote_data)
         return OrderImpactResponse(**result)
 
     @mcp.tool(
@@ -1866,7 +1866,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         # 2. Cancel them all
         if order_ids:
             try:
-                await call_core(lambda client: cancel_order_set(client, order_ids))
+                await call_core(lambda client: core_cancel_order_set(client, order_ids))
                 cancelled_ids = order_ids
             except Exception as exc:
                 errors.append(f"Failed to cancel orders: {exc}")
@@ -2106,7 +2106,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         mime_type="application/json",
     )
     async def resource_option_chain(symbol: str) -> str:
-        chain = await get_option_chain(
+        chain = await core_get_option_chain(
             underlying=SymbolSpec(
                 symbol=symbol.upper(),
                 securityType="STK",
