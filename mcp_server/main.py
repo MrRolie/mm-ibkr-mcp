@@ -123,6 +123,7 @@ from mcp_server.services import IBKRMCPService
 from mcp_server.telegram.approval import (
     create_approval,
     create_resolved_approval,
+    find_approved_trade_by_client_order_id,
     get_approval,
     mark_used,
     set_telegram_message_id,
@@ -355,9 +356,24 @@ def _validate_approval(
     approval_id: Optional[str],
     *,
     required_type: str,
+    client_order_id: Optional[str] = None,
 ) -> Optional[dict[str, Any]]:
-    """Validate an approval record and return it when it is ready for use."""
+    """Validate an approval record and return it when it is ready for use.
+
+    When approval_id is None and a client_order_id is provided, attempts
+    auto-resolution by looking up the most recent approved-but-unused trade
+    approval matching that client_order_id.
+    """
     if approval_id is None:
+        if required_type == "trade" and client_order_id:
+            match = find_approved_trade_by_client_order_id(client_order_id)
+            if match is not None:
+                logger.info(
+                    "Auto-resolved approval_id=%s for clientOrderId=%s",
+                    match["approval_id"],
+                    client_order_id,
+                )
+                return match
         raise MCPToolError("APPROVAL_REQUIRED", "approval_id is required for this operation")
     rec = get_approval(approval_id)
     if rec is None:
@@ -794,9 +810,14 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
 
         if config.approval_requires_telegram:
             _ensure_telegram_ready(config, telegram_cfg)
-            _validate_approval(approval_id, required_type="trade")
-            assert approval_id is not None
-            mark_used(approval_id)
+            rec = _validate_approval(
+                approval_id,
+                required_type="trade",
+                client_order_id=order.clientOrderId,
+            )
+            assert rec is not None
+            resolved_approval_id = rec["approval_id"]
+            mark_used(resolved_approval_id)
 
         return await call_core(lambda client: core_place_order(client, order))
 

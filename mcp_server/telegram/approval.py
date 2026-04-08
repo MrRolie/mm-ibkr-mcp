@@ -185,6 +185,37 @@ def mark_used(approval_id: str) -> None:
         )
 
 
+def find_approved_trade_by_client_order_id(
+    client_order_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Find the most recent approved-but-unused trade approval matching a clientOrderId.
+
+    This enables auto-resolution when the caller omits approval_id but has a
+    recent matching approval on file.
+    """
+    _expire_stale()
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM approvals
+             WHERE approval_type = 'trade'
+               AND status = 'approved'
+               AND json_extract(request_data, '$.order.clientOrderId') = ?
+             ORDER BY resolved_at DESC
+             LIMIT 1
+            """,
+            (client_order_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    rec = dict(row)
+    try:
+        rec["request_data"] = json.loads(rec["request_data"])
+    except Exception:
+        pass
+    return rec
+
+
 def _expire_stale() -> None:
     """Flip pending approvals that have passed their expiry time to 'expired'."""
     now_iso = _iso(_now())
@@ -194,6 +225,6 @@ def _expire_stale() -> None:
             UPDATE approvals
                SET status = 'expired', resolved_at = ?
              WHERE status = 'pending' AND expires_at < ?
-            """,
+             """,
             (now_iso, now_iso),
         )
