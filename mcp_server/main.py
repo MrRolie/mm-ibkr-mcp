@@ -267,8 +267,18 @@ def _status_from_control_state(state: ControlState) -> TradingStatusResponse:
     """Build TradingStatusResponse from a ControlState instance."""
     validation_errors = validate_control(state)
     override_exists, override_message = state.validate_override_file()
+    
+    from ibkr_core.runtime_config import load_runtime_config
+    runtime = load_runtime_config()
+    if runtime.ibkr_port == runtime.ibkr_live_port:
+        effective_mode = "live"
+    elif runtime.ibkr_port == runtime.ibkr_paper_port:
+        effective_mode = "paper"
+    else:
+        effective_mode = state.trading_mode
+        
     return TradingStatusResponse(
-        tradingMode=state.trading_mode,
+        tradingMode=effective_mode,
         ordersEnabled=state.orders_enabled,
         dryRun=state.dry_run,
         effectiveDryRun=state.effective_dry_run(),

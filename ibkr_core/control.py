@@ -173,8 +173,18 @@ def get_control_status(base_dir: Optional[Path] = None) -> dict:
     errors = validate_control(state)
     override_valid, override_msg = state.validate_override_file()
 
+    # Determine actual trading mode from active config port
+    from ibkr_core.runtime_config import load_runtime_config
+    runtime = load_runtime_config()
+    if runtime.ibkr_port == runtime.ibkr_live_port:
+        effective_mode = "live"
+    elif runtime.ibkr_port == runtime.ibkr_paper_port:
+        effective_mode = "paper"
+    else:
+        effective_mode = state.trading_mode
+
     return {
-        "trading_mode": state.trading_mode,
+        "trading_mode": effective_mode,
         "orders_enabled": state.orders_enabled,
         "dry_run": state.dry_run,
         "effective_dry_run": state.effective_dry_run(),

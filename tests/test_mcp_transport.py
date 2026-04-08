@@ -86,10 +86,10 @@ async def test_streamable_http_initialize_list_and_call():
 
     async with open_mcp_session(server) as session:
         tools = await session.list_tools()
-        result = await session.call_tool("ibkr_get_trading_status")
+        result = await session.call_tool("get_trading_status")
 
     tool_names = [tool.name for tool in tools.tools]
-    assert "ibkr_get_trading_status" in tool_names
+    assert "get_trading_status" in tool_names
     assert result.isError is False
     assert result.structuredContent["tradingMode"] == "paper"
     assert result.structuredContent["ordersEnabled"] is False
@@ -114,7 +114,7 @@ async def test_place_order_requires_client_order_id():
     }
 
     async with open_mcp_session(server) as session:
-        result = await session.call_tool("ibkr_place_order", payload)
+        result = await session.call_tool("place_order", payload)
 
     assert result.isError is True
     assert "clientOrderId is required" in result.content[0].text
@@ -140,7 +140,7 @@ async def test_admin_update_rejects_legacy_live_fields():
     }
 
     async with open_mcp_session(server) as session:
-        result = await session.call_tool("ibkr_admin_update_trading_control", payload)
+        result = await session.call_tool("admin_update_trading_control", payload)
 
     assert result.isError is True
     assert "Legacy live-trading fields are not supported" in result.content[0].text
@@ -166,7 +166,7 @@ async def test_admin_update_can_toggle_paper_orders():
     }
 
     async with open_mcp_session(server) as session:
-        result = await session.call_tool("ibkr_admin_update_trading_control", payload)
+        result = await session.call_tool("admin_update_trading_control", payload)
 
     assert result.isError is False
     assert result.structuredContent["currentState"]["ordersEnabled"] is True

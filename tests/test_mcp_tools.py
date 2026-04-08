@@ -9,55 +9,55 @@ from mcp_server.main import create_mcp_server
 
 CANONICAL_TOOL_NAMES = [
     # Health / status
-    "ibkr_health",
-    "ibkr_get_trading_status",
-    "ibkr_get_schedule_status",
+    "health",
+    "get_trading_status",
+    "get_schedule_status",
     # Market data
-    "ibkr_resolve_contract",
-    "ibkr_get_quote",
-    "ibkr_get_historical_bars",
+    "resolve_contract",
+    "get_quote",
+    "get_historical_bars",
     # Account
-    "ibkr_get_account_summary",
-    "ibkr_get_positions",
-    "ibkr_get_pnl",
+    "get_account_summary",
+    "get_positions",
+    "get_pnl",
     # Orders
-    "ibkr_list_open_orders",
-    "ibkr_get_order_status",
-    "ibkr_get_order_set_status",
-    "ibkr_preview_order",
-    "ibkr_place_order",
-    "ibkr_cancel_order",
-    "ibkr_cancel_order_set",
-    "ibkr_preview_order_basket",
-    "ibkr_create_trade_intent",
-    "ibkr_request_trade_intent_approval",
-    "ibkr_submit_trade_intent",
-    "ibkr_get_trade_intent",
-    "ibkr_list_trade_intents",
-    "ibkr_reconcile_trade_intent",
-    "ibkr_cancel_trade_intent",
+    "list_open_orders",
+    "get_order_status",
+    "get_order_set_status",
+    "preview_order",
+    "place_order",
+    "cancel_order",
+    "cancel_order_set",
+    "preview_order_basket",
+    "create_trade_intent",
+    "request_trade_intent_approval",
+    "submit_trade_intent",
+    "get_trade_intent",
+    "list_trade_intents",
+    "reconcile_trade_intent",
+    "cancel_trade_intent",
     # Options
-    "ibkr_get_option_chain",
-    "ibkr_get_option_snapshot",
+    "get_option_chain",
+    "get_option_snapshot",
     # Telegram human-in-the-loop
-    "ibkr_notify",
-    "ibkr_request_trade_approval",
-    "ibkr_request_live_trading_unlock",
-    "ibkr_check_approval_status",
+    "notify",
+    "request_trade_approval",
+    "request_environment_change",
+    "execute_environment_change",
+    "check_approval_status",
     # Risk and impact
-    "ibkr_assess_order_impact",
-    "ibkr_get_portfolio_risk",
-    "ibkr_check_position_limits",
+    "assess_order_impact",
+    "get_portfolio_risk",
+    "check_position_limits",
     # Agent profiles
-    "ibkr_get_agent_profile",
-    "ibkr_validate_against_profile",
+    "get_agent_profile",
+    "validate_against_profile",
     # Session / audit
-    "ibkr_get_session_activity",
-    "ibkr_get_audit_log",
+    "get_session_activity",
+    "get_audit_log",
     # Emergency
-    "ibkr_emergency_stop",
+    "emergency_stop",
 ]
-
 
 @pytest.mark.asyncio
 async def test_mcp_tool_surface_matches_contract():
@@ -80,11 +80,11 @@ async def test_mcp_tools_have_annotations_and_output_schemas():
         assert tools[name].description
         assert tools[name].annotations is not None
 
-    assert tools["ibkr_health"].annotations.readOnlyHint is True
-    assert tools["ibkr_health"].annotations.idempotentHint is True
-    assert tools["ibkr_place_order"].annotations.destructiveHint is True
-    assert tools["ibkr_place_order"].annotations.idempotentHint is True
-    assert tools["ibkr_cancel_order"].annotations.destructiveHint is True
+    assert tools["health"].annotations.readOnlyHint is True
+    assert tools["health"].annotations.idempotentHint is True
+    assert tools["place_order"].annotations.destructiveHint is True
+    assert tools["place_order"].annotations.idempotentHint is True
+    assert tools["cancel_order"].annotations.destructiveHint is True
 
 
 @pytest.mark.asyncio
@@ -93,8 +93,8 @@ async def test_admin_tools_are_opt_in():
     server = create_mcp_server(MCPConfig(enable_admin_tools=True))
     tools = {tool.name for tool in await server.list_tools()}
 
-    assert "ibkr_admin_verify_gateway" in tools
-    assert "ibkr_admin_update_trading_control" in tools
+    assert "admin_verify_gateway" in tools
+    assert "admin_update_trading_control" in tools
 
 
 @pytest.mark.asyncio
