@@ -17,6 +17,8 @@ class TelegramConfig:
     approval_timeout_seconds: int = 300
     # How long (seconds) a live-trading-unlock request waits.
     live_unlock_timeout_seconds: int = 120
+    # How long (seconds) an approved-but-unused approval remains valid before auto-expiring.
+    approved_unused_expiry_seconds: int = 600
 
     @property
     def is_configured(self) -> bool:
@@ -43,6 +45,9 @@ def get_telegram_config() -> Optional[TelegramConfig]:
         ),
         live_unlock_timeout_seconds=_parse_int(
             os.environ.get("TELEGRAM_LIVE_UNLOCK_TIMEOUT_SECONDS"), 120
+        ),
+        approved_unused_expiry_seconds=_parse_int(
+            os.environ.get("APPROVED_UNUSED_EXPIRY_SECONDS"), 600
         ),
     )
 

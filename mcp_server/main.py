@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import sqlite3
+import uuid
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -124,6 +125,7 @@ from mcp_server.telegram.approval import (
     create_approval,
     create_resolved_approval,
     find_approved_trade_by_client_order_id,
+    find_approved_trade_by_order_params,
     get_approval,
     mark_used,
     set_telegram_message_id,
@@ -367,16 +369,26 @@ def _validate_approval(
     *,
     required_type: str,
     client_order_id: Optional[str] = None,
+    order_params: Optional[dict[str, Any]] = None,
+    approved_unused_expiry_seconds: int = 600,
 ) -> Optional[dict[str, Any]]:
     """Validate an approval record and return it when it is ready for use.
 
-    When approval_id is None and a client_order_id is provided, attempts
-    auto-resolution by looking up the most recent approved-but-unused trade
-    approval matching that client_order_id.
+    Auto-resolution chain for required_type='trade':
+      1. clientOrderId match  — exact match on the caller's clientOrderId
+      2. order-params match   — exact match on symbol/securityType/side/qty/orderType
+                                 (defence-in-depth when prior approval had no clientOrderId)
+
+    Both passes call _expire_stale() first so expired approved-but-unused records
+    are excluded automatically.
     """
-    if approval_id is None:
-        if required_type == "trade" and client_order_id:
-            match = find_approved_trade_by_client_order_id(client_order_id)
+    if approval_id is None and required_type == "trade":
+        # Pass 1: clientOrderId match
+        if client_order_id:
+            match = find_approved_trade_by_client_order_id(
+                client_order_id,
+                approved_unused_expiry_seconds=approved_unused_expiry_seconds,
+            )
             if match is not None:
                 logger.info(
                     "Auto-resolved approval_id=%s for clientOrderId=%s",
@@ -384,7 +396,38 @@ def _validate_approval(
                     client_order_id,
                 )
                 return match
-        raise MCPToolError("APPROVAL_REQUIRED", "approval_id is required for this operation")
+        # Pass 2: order-params match (defence-in-depth fallback)
+        if order_params is not None:
+            symbol = order_params.get("instrument", {}).get("symbol")
+            sec_type = order_params.get("instrument", {}).get("securityType")
+            side = order_params.get("side")
+            quantity = order_params.get("quantity")
+            order_type = order_params.get("orderType")
+            if all(v is not None for v in (symbol, sec_type, side, quantity, order_type)):
+                match = find_approved_trade_by_order_params(
+                    symbol=symbol,
+                    security_type=sec_type,
+                    side=side,
+                    quantity=float(quantity),
+                    order_type=order_type,
+                    approved_unused_expiry_seconds=approved_unused_expiry_seconds,
+                )
+                if match is not None:
+                    logger.info(
+                        "Auto-resolved approval_id=%s for order params "
+                        "symbol=%s side=%s quantity=%s orderType=%s",
+                        match["approval_id"],
+                        symbol,
+                        side,
+                        quantity,
+                        order_type,
+                    )
+                    return match
+        raise MCPToolError(
+            "APPROVAL_REQUIRED",
+            "approval_id is required. Obtain one via ibkr_request_trade_approval "
+            "before calling ibkr_place_order.",
+        )
     rec = get_approval(approval_id)
     if rec is None:
         raise MCPToolError("INVALID_APPROVAL", f"Approval '{approval_id}' not found.")
@@ -824,6 +867,8 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
                 approval_id,
                 required_type="trade",
                 client_order_id=order.clientOrderId,
+                order_params=order.model_dump(mode="json", exclude_none=True),
+                approved_unused_expiry_seconds=telegram_cfg.approved_unused_expiry_seconds,
             )
             assert rec is not None
             resolved_approval_id = rec["approval_id"]
@@ -1345,6 +1390,9 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         preview: Optional[OrderPreview] = None,
     ) -> ApprovalStatusResponse:
         _ensure_fully_qualified_option(order.instrument)
+        # Auto-generate clientOrderId so every approval is auto-resolvable by _validate_approval.
+        if not order.clientOrderId:
+            order.clientOrderId = f"auto-{uuid.uuid4().hex[:12]}"
         order_data = order.model_dump(mode="json", exclude_none=True)
         preview_data = preview.model_dump(mode="json", exclude_none=True) if preview else None
         timeout = telegram_cfg.approval_timeout_seconds if telegram_cfg else 300

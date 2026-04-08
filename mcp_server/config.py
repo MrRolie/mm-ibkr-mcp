@@ -74,6 +74,7 @@ class MCPConfig:
     telegram_chat_id: Optional[str] = None
     telegram_approval_timeout_seconds: int = 300
     telegram_live_unlock_timeout_seconds: int = 120
+    approved_unused_expiry_seconds: int = 600
     order_approval_mode: ApprovalMode = "telegram"
     agent_profile_dir: Optional[str] = None
     agent_profile_id: str = "default"
@@ -177,6 +178,9 @@ def get_mcp_config() -> MCPConfig:
         ),
         telegram_live_unlock_timeout_seconds=_parse_int(
             os.environ.get("TELEGRAM_LIVE_UNLOCK_TIMEOUT_SECONDS"), 120
+        ),
+        approved_unused_expiry_seconds=_parse_int(
+            os.environ.get("APPROVED_UNUSED_EXPIRY_SECONDS"), 600
         ),
         order_approval_mode=order_approval_mode or "telegram",
         agent_profile_dir=os.environ.get("MCP_AGENT_PROFILE_DIR") or None,

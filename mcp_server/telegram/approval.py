@@ -125,7 +125,7 @@ def create_resolved_approval(
 
 def get_approval(approval_id: str) -> Optional[Dict[str, Any]]:
     """Fetch an approval by ID, auto-expiring stale pending records first."""
-    _expire_stale()
+    _expire_stale()  # Uses default 600 s; callers that want the configured value pass explicitly
     with _connect() as conn:
         row = conn.execute(
             "SELECT * FROM approvals WHERE approval_id = ?", (approval_id,)
@@ -187,13 +187,14 @@ def mark_used(approval_id: str) -> None:
 
 def find_approved_trade_by_client_order_id(
     client_order_id: str,
+    approved_unused_expiry_seconds: int = 600,
 ) -> Optional[Dict[str, Any]]:
     """Find the most recent approved-but-unused trade approval matching a clientOrderId.
 
     This enables auto-resolution when the caller omits approval_id but has a
     recent matching approval on file.
     """
-    _expire_stale()
+    _expire_stale(approved_unused_expiry_seconds=approved_unused_expiry_seconds)
     with _connect() as conn:
         row = conn.execute(
             """
@@ -216,15 +217,76 @@ def find_approved_trade_by_client_order_id(
     return rec
 
 
-def _expire_stale() -> None:
-    """Flip pending approvals that have passed their expiry time to 'expired'."""
+def find_approved_trade_by_order_params(
+    symbol: str,
+    security_type: str,
+    side: str,
+    quantity: float,
+    order_type: str,
+    approved_unused_expiry_seconds: int = 600,
+) -> Optional[Dict[str, Any]]:
+    """Find the most recent approved-but-unused trade approval matching key order params.
+
+    This is a defence-in-depth fallback when clientOrderId auto-resolution fails —
+    e.g. when a prior approval was created before clientOrderId was auto-generated.
+
+    Exact match on symbol, securityType, side, quantity, and orderType is required.
+    Approved-but-unused approvals that have passed the approved_unused_expiry_seconds
+    window are excluded.
+    """
+    _expire_stale(approved_unused_expiry_seconds=approved_unused_expiry_seconds)
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM approvals
+             WHERE approval_type = 'trade'
+               AND status = 'approved'
+               AND json_extract(request_data, '$.order.instrument.symbol') = ?
+               AND json_extract(request_data, '$.order.instrument.securityType') = ?
+               AND json_extract(request_data, '$.order.side') = ?
+               AND json_extract(request_data, '$.order.quantity') = ?
+               AND json_extract(request_data, '$.order.orderType') = ?
+             ORDER BY resolved_at DESC
+             LIMIT 1
+            """,
+            (symbol, security_type, side, quantity, order_type),
+        ).fetchone()
+    if row is None:
+        return None
+    rec = dict(row)
+    try:
+        rec["request_data"] = json.loads(rec["request_data"])
+    except Exception:
+        pass
+    return rec
+
+
+def _expire_stale(approved_unused_expiry_seconds: int = 600) -> None:
+    """Flip stale approvals to 'expired'.
+
+    Two categories are expired:
+      1. pending approvals past their per-approval expires_at window
+      2. approved-but-unused approvals where resolved_at is more than
+         approved_unused_expiry_seconds ago (default 600 s / 10 min, configurable
+         via APPROVED_UNUSED_EXPIRY_SECONDS)
+    """
     now_iso = _iso(_now())
+    stale_approved_iso = _iso(_now() - timedelta(seconds=approved_unused_expiry_seconds))
     with _connect() as conn:
         conn.execute(
             """
             UPDATE approvals
                SET status = 'expired', resolved_at = ?
              WHERE status = 'pending' AND expires_at < ?
-             """,
+            """,
             (now_iso, now_iso),
+        )
+        conn.execute(
+            """
+            UPDATE approvals
+               SET status = 'expired'
+             WHERE status = 'approved'
+               AND resolved_at < ?
+            """,
+            (stale_approved_iso,),
         )

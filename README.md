@@ -86,6 +86,7 @@ MCP_HOST=127.0.0.1
 MCP_PORT=8001
 MCP_AUTH_TOKEN=change-me
 MCP_ENABLE_ADMIN_TOOLS=true
+APPROVED_UNUSED_EXPIRY_SECONDS=600   # auto-expiry for approved-but-unused approvals (default 600 s)
 ```
 
 ## Running
