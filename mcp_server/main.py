@@ -305,8 +305,18 @@ def _json_payload(value: Any) -> str:
 
 def _normalize_control_expectation(state: ControlState) -> TradingControlExpectation:
     """Convert ControlState into the compare-and-swap expectation model."""
+    from ibkr_core.runtime_config import load_runtime_config
+    
+    runtime = load_runtime_config()
+    if runtime.ibkr_port == runtime.ibkr_live_port:
+        effective_mode = "live"
+    elif runtime.ibkr_port == runtime.ibkr_paper_port:
+        effective_mode = "paper"
+    else:
+        effective_mode = state.trading_mode
+
     return TradingControlExpectation(
-        tradingMode=state.trading_mode,
+        tradingMode=effective_mode,
         ordersEnabled=state.orders_enabled,
         dryRun=state.dry_run,
         blockReason=state.block_reason,
