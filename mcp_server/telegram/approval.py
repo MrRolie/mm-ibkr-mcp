@@ -241,11 +241,11 @@ def find_approved_trade_by_order_params(
             SELECT * FROM approvals
              WHERE approval_type = 'trade'
                AND status = 'approved'
-               AND json_extract(request_data, '$.order.instrument.symbol') = ?
-               AND json_extract(request_data, '$.order.instrument.securityType') = ?
-               AND json_extract(request_data, '$.order.side') = ?
-               AND json_extract(request_data, '$.order.quantity') = ?
-               AND json_extract(request_data, '$.order.orderType') = ?
+               AND UPPER(json_extract(request_data, '$.order.instrument.symbol')) = UPPER(?)
+               AND UPPER(json_extract(request_data, '$.order.instrument.securityType')) = UPPER(?)
+               AND UPPER(json_extract(request_data, '$.order.side')) = UPPER(?)
+               AND ABS(CAST(json_extract(request_data, '$.order.quantity') AS REAL) - ?) < 1e-6
+               AND UPPER(json_extract(request_data, '$.order.orderType')) = UPPER(?)
              ORDER BY resolved_at DESC
              LIMIT 1
             """,

@@ -208,6 +208,40 @@ class TestFindApprovedTradeByOrderParams:
         assert result is not None
         assert result["approval_id"] == rec["approval_id"]
 
+    def test_finds_approved_matching_params_case_insensitive(self):
+        """Matches case insensitively on symbol, security_type, side, and order_type."""
+        rec = create_resolved_approval(
+            "trade",
+            _order_params_request(symbol="nvda", side="sell", quantity=5.0, order_type="mkt"),
+            status="approved",
+        )
+        result = find_approved_trade_by_order_params(
+            symbol="NVDA",
+            security_type="STK",
+            side="SELL",
+            quantity=5.0,
+            order_type="MKT",
+        )
+        assert result is not None
+        assert result["approval_id"] == rec["approval_id"]
+
+    def test_finds_approved_matching_params_float_int_equivalence(self):
+        """Matches quantities robustly across float and int differences in JSON serialization."""
+        rec = create_resolved_approval(
+            "trade",
+            _order_params_request(symbol="NVDA", side="SELL", quantity=5, order_type="MKT"),
+            status="approved",
+        )
+        result = find_approved_trade_by_order_params(
+            symbol="NVDA",
+            security_type="STK",
+            side="SELL",
+            quantity=5.0,
+            order_type="MKT",
+        )
+        assert result is not None
+        assert result["approval_id"] == rec["approval_id"]
+
     def test_returns_none_for_symbol_mismatch(self):
         """Returns None when symbol does not match."""
         create_resolved_approval(
