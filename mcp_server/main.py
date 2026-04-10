@@ -2104,6 +2104,18 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
                     updated.block_reason = normalized_reason
                     updated_fields.append("blockReason")
 
+            # If ordersEnabled=True and dryRun=False are both being set,
+            # this is an intentional unlock — clear the safety-lock blockReason.
+            if (
+                updated.orders_enabled
+                and not updated.dry_run
+                and current.block_reason is not None
+                and current.block_reason.startswith("Safety lock engaged")
+            ):
+                updated.block_reason = None
+                if "blockReason" not in updated_fields:
+                    updated_fields.append("blockReason")
+
             validation_errors = validate_control(updated)
             if validation_errors:
                 raise MCPToolError(
