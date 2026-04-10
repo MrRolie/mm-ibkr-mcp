@@ -15,30 +15,31 @@ Execute a pre-evaluated single-leg order through Telegram approval and broker pl
 
 ## Workflow
 
-### Phase 1 — Trading Mode Preparation
+### Phase 1 — Trading Mode Confirmation (always do this first)
 
-1. Call `ibkr_get_trading_status` — check `dryRun`, `ordersEnabled`, `tradingMode`, `blockReason`
-2. If the user wants to change `tradingMode` (paper ↔ live):
-   - Call `ibkr_request_environment_change` with `target_env` and `reason`
-   - Wait for approval (blocking call)
-   - Once approved, call `ibkr_execute_environment_change` with the `approval_id`
-   - Re-check `ibkr_get_trading_status` to confirm new state
-3. If `dryRun=true` and the user wants live execution:
-   - Call `ibkr_admin_update_trading_control` with:
-     - `expectedCurrentState` from the current trading status
-     - `ordersEnabled: true` and `dryRun: false`
-     - `reason` explaining why
-4. If `ordersEnabled=false` or `blockReason` is set, stop here and report the block to the user
+1. Call `ibkr_get_trading_status` — record `tradingMode`, `dryRun`, `ordersEnabled`, `blockReason`
+2. **Call `question` to confirm current state is the target:**
+   - Show the full current state: `tradingMode`, `dryRun`, `ordersEnabled`, `blockReason`
+   - Header: "Confirm trading status"
+   - Options: "Yes, proceed as-is", "No, adjust settings"
+3. **If user confirms "Yes, proceed as-is":** proceed to Phase 2 with current state
+4. **If user chooses "No, adjust settings":** call `question` for each toggle that needs changing, one at a time:
+   - For `tradingMode`: "Paper (simulation)" or "Live trading"
+   - For `dryRun`: "Simulation only (dryRun=true)" or "Live execution (dryRun=false)"
+   - For `ordersEnabled`: "Orders blocked" or "Orders enabled"
+   - After each toggle is set, call the appropriate tool to apply the change (environment change or admin update), re-check status, then continue to the next toggle
+   - Once all intended toggles are set, re-check `ibkr_get_trading_status` and confirm the final state before proceeding to Phase 2
+5. **Never assume intent — always confirm current state or proposed changes via `question`.**
 
 ### Phase 2 — Approval
 
-5. Call `ibkr_request_trade_approval` with:
+6. Call `ibkr_request_trade_approval` with:
    - `order`: the full OrderSpec (must include `clientOrderId` matching the evaluated order)
    - `preview`: the OrderPreview from `ibkr_preview_order`
    - `reason`: human-readable reason for the trade
-6. If the response is `denied`, report to the user and stop
-7. If the response is `expired`, inform the user and stop
-8. If the response is `approved`, proceed immediately to placement
+7. If the response is `denied`, report to the user and stop
+8. If the response is `expired`, inform the user and stop
+9. If the response is `approved`, proceed immediately to placement
 
 ### Phase 3 — Placement
 
@@ -50,9 +51,10 @@ Execute a pre-evaluated single-leg order through Telegram approval and broker pl
 
 - **Prerequisite:** `ibkr-evaluate-order` must have been run first. Do not use this skill without pre-validation.
 - Use the **same `clientOrderId`** that was used in the evaluation phase — this is what enables auto-resolution of the `approval_id`.
-- If `dryRun=true` in `tradingMode=paper`, the order will not execute — confirm with the user that they want to override before proceeding.
+- `tradingMode=paper` with `dryRun=true` means the order is **always simulated** — confirm this is the user's intended mode in Phase 1 before proceeding.
 - If the user denies the Telegram approval request, do not place the order.
 - After placement, always verify with `ibkr_get_order_status` — do not assume the order succeeded without confirmation.
+- **Mandatory `question` tool:** Do NOT use freeform text to request confirmations. Use the `question` tool exclusively for all Phase 1 confirmation flows. Ending a turn with a plain-text confirmation request is a policy violation.
 
 ## Output Contract
 

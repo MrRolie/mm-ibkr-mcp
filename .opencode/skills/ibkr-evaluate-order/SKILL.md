@@ -20,7 +20,9 @@ Evaluate and validate a single-leg order without placing it. Produces a constrai
 
 1. Call `ibkr_get_trading_status` — read `dryRun`, `ordersEnabled`, `tradingMode`, `blockReason`
 2. If `dryRun=true` or `tradingMode=paper`, note it in the output (the user may want to change it before evaluating)
-3. If `ordersEnabled=false` or a `blockReason` is set, stop here and report the block to the user
+3. If `ordersEnabled=false`, stop here and report the block to the user
+   - `blockReason` alone is informational and does NOT block evaluation when `ordersEnabled=true` and `dryRun=false`
+   - A safety-lock blockReason (e.g., "Safety lock engaged after environment switch") is cleared automatically when the user intentionally unlocks via `ibkr_admin_update_trading_control`
 
 ### Phase 2 — Instrument Qualification
 
@@ -53,7 +55,7 @@ Evaluate and validate a single-leg order without placing it. Produces a constrai
 
 9. If the qty needed adjustment to satisfy profile limits or the minimum remaining position constraint, note the adjusted qty and why.
 
-10. Ask the user: "Ready to submit for Telegram approval?" (only proceed if they confirm)
+10. Call `question` to confirm: "Ready to submit for Telegram approval?" with options "Yes, submit" and "No, cancel" (only proceed if they confirm)
 
 ## Guardrails
 
