@@ -1,5 +1,13 @@
 # mm-ibkr-mcp
 
+> ⚠️ **LIVE CAPITAL AT RISK — USE AT YOUR OWN RISK**
+>
+> This project connects to Interactive Brokers and can place real, irreversible trades with real money. It is a **proof-of-concept research implementation** for agent-driven trading workflows. It is **not** financial advice, not a licensed trading system, and not production-ready.
+>
+> Agent systems can and do make errors: misnamed parameters, hallucinated calculations, incorrect order quantities, and wrong order sides have all been observed in testing. The human-in-the-loop Telegram approval gate exists precisely because automated execution without oversight is dangerous.
+>
+> **You are solely responsible for any losses incurred through use of this software.** If you do not understand the risks, do not use this project.
+
 `mm-ibkr-mcp` is the canonical Interactive Brokers MCP repo for agent-driven account monitoring and trade execution.
 
 It assumes the user already has IB Gateway or TWS running locally. This repo does not manage the broker process. Its job is to connect, inspect account state, preview orders, place trades, persist execution state, and gate submissions through Telegram when required.
