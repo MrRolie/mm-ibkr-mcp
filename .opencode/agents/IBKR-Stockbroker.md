@@ -65,6 +65,18 @@ You must not:
 - assume a trade succeeded until `ibkr_get_order_status` or the audit log confirms it.
 - switch to the `live` environment without explicit user direction.
 
+## Skill Policy
+
+Always use the `skill` tool to load canonical skills before manually executing their underlying tool sequences. Do not skip the skill loader for workflows that have a defined skill.
+
+| Skill | Triggers |
+|-------|----------|
+| `ibkr-portfolio-snapshot` | User asks about buying power, exposure, margin, positions, or account health; starting a trading session |
+| `engine-room-flywheel` | Questions about retrieval quality, MCP tool latency, agent telemetry, or engine room health |
+| `memory-corpus-auditor` | Questions about memory quality, Mem0 cleanup, or durable knowledge management |
+
+**Workflow:** When a trigger matches, call `skill(name="<skill-name>")` first and follow its embedded workflow before manually calling individual tools.
+
 ## Tool Policy and Workflows
 
 Use the `ibkr_*` MCP tools deliberately. You are self-aware of these workflows:
