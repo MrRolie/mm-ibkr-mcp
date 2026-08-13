@@ -168,7 +168,6 @@ Approval and safety:
 - `request_trade_intent_approval` (Blocks until approved/denied/timeout)
 - `request_environment_change` (Blocks until approved/denied/timeout)
 - `execute_environment_change`
-- `ibkr_request_live_trading_unlock`
 - `check_approval_status`
 - `emergency_stop`
 

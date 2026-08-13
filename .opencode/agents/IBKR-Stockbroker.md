@@ -17,17 +17,113 @@ permission:
   skill: allow
   todowrite: allow
 
-  # IBKR MCP tools (safe read-only and preview tools)
-  ibkr_*: allow
+  # ===== IBKR MCP tools =====
+  #
+  # Tool naming: OpenCode exposes an MCP tool to the agent as
+  # `<server-key>_<tool-name>`, where <server-key> is the key this server is
+  # given in your OpenCode config and <tool-name> is the name the server
+  # registers (README, "Canonical tools"). Register this server under the key
+  # `ibkr` so the `ibkr_`-prefixed entries below match. The bare spellings are
+  # listed alongside them so the gate also holds for a client that passes tool
+  # names through without a namespace prefix. Under any other server key none
+  # of these entries match and every tool falls through to `"*": deny` — the
+  # agent stops working, which is the intended direction of failure.
+  #
+  # SAFETY INVARIANT — do not weaken: no `allow` rule in this file matches a
+  # tool the server marks `destructiveHint=True`. Every such tool is listed
+  # `ask`, and any tool not listed at all falls through to `"*": deny`. There
+  # is therefore no rule-evaluation order, and no future tool addition, under
+  # which a destructive tool can resolve to `allow`; the worst case is a
+  # spurious deny. Do NOT reintroduce a broad `ibkr_*: allow` or any other
+  # wildcard spanning the destructive names — that is precisely what let
+  # ungated tools through before.
 
-  # High-risk IBKR tools (execution, cancellation, and safety overrides)
+  # Read-only, preview, and approval-request tools.
+  # (readOnlyHint=True, or destructiveHint=False with openWorldHint=True.)
+  health: allow
+  ibkr_health: allow
+  get_trading_status: allow
+  ibkr_get_trading_status: allow
+  get_schedule_status: allow
+  ibkr_get_schedule_status: allow
+  resolve_contract: allow
+  ibkr_resolve_contract: allow
+  get_quote: allow
+  ibkr_get_quote: allow
+  get_historical_bars: allow
+  ibkr_get_historical_bars: allow
+  get_account_summary: allow
+  ibkr_get_account_summary: allow
+  get_positions: allow
+  ibkr_get_positions: allow
+  get_pnl: allow
+  ibkr_get_pnl: allow
+  list_open_orders: allow
+  ibkr_list_open_orders: allow
+  get_order_status: allow
+  ibkr_get_order_status: allow
+  get_order_set_status: allow
+  ibkr_get_order_set_status: allow
+  preview_order: allow
+  ibkr_preview_order: allow
+  preview_order_basket: allow
+  ibkr_preview_order_basket: allow
+  request_trade_intent_approval: allow
+  ibkr_request_trade_intent_approval: allow
+  get_trade_intent: allow
+  ibkr_get_trade_intent: allow
+  list_trade_intents: allow
+  ibkr_list_trade_intents: allow
+  reconcile_trade_intent: allow
+  ibkr_reconcile_trade_intent: allow
+  get_option_chain: allow
+  ibkr_get_option_chain: allow
+  get_option_snapshot: allow
+  ibkr_get_option_snapshot: allow
+  notify: allow
+  ibkr_notify: allow
+  request_trade_approval: allow
+  ibkr_request_trade_approval: allow
+  request_environment_change: allow
+  ibkr_request_environment_change: allow
+  check_approval_status: allow
+  ibkr_check_approval_status: allow
+  assess_order_impact: allow
+  ibkr_assess_order_impact: allow
+  get_portfolio_risk: allow
+  ibkr_get_portfolio_risk: allow
+  check_position_limits: allow
+  ibkr_check_position_limits: allow
+  get_agent_profile: allow
+  ibkr_get_agent_profile: allow
+  validate_against_profile: allow
+  ibkr_validate_against_profile: allow
+  get_session_activity: allow
+  ibkr_get_session_activity: allow
+  get_audit_log: allow
+  ibkr_get_audit_log: allow
+  admin_verify_gateway: allow
+  ibkr_admin_verify_gateway: allow
+
+  # Destructive tools (destructiveHint=True) — always prompt the human.
+  place_order: ask
   ibkr_place_order: ask
+  cancel_order: ask
   ibkr_cancel_order: ask
+  cancel_order_set: ask
+  ibkr_cancel_order_set: ask
+  create_trade_intent: ask
+  ibkr_create_trade_intent: ask
+  submit_trade_intent: ask
   ibkr_submit_trade_intent: ask
+  cancel_trade_intent: ask
   ibkr_cancel_trade_intent: ask
-  ibkr_emergency_stop: ask
-  ibkr_admin_update_trading_control: ask
+  execute_environment_change: ask
   ibkr_execute_environment_change: ask
+  emergency_stop: ask
+  ibkr_emergency_stop: ask
+  admin_update_trading_control: ask
+  ibkr_admin_update_trading_control: ask
 
   # Subagent access
   task:
