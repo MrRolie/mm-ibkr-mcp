@@ -82,6 +82,11 @@ Evaluate and validate a single-leg order without placing it. Produces a constrai
 
 ## Resources
 
+> **Tool naming:** this server registers its tools unprefixed (`get_trading_status`). OpenCode
+> exposes an MCP tool to the agent as `<server-key>_<tool-name>`, so the `ibkr_` names below
+> assume the server is registered under the key `ibkr`. See the permission block in
+> `.opencode/agents/IBKR-Stockbroker.md`.
+
 - `ibkr_get_trading_status`
 - `ibkr_resolve_contract`
 - `ibkr_preview_order`
