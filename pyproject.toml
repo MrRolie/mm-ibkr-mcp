@@ -1,0 +1,84 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mm-ibkr-mcp"
+version = "0.1.0"
+description = "Interactive Brokers MCP server with account monitoring, approvals, and basket trading"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "mm-ibkr contributors" }]
+urls = { Homepage = "https://github.com/MrRolie/mm-ibkr-mcp", Repository = "https://github.com/MrRolie/mm-ibkr-mcp", Issues = "https://github.com/MrRolie/mm-ibkr-mcp/issues" }
+dependencies = [
+    "ib-insync>=0.9.17,<1.0",
+    "mcp>=1.2,<2.0",
+    "pydantic>=2.0,<3.0",
+    "python-dotenv>=1.0,<2.0",
+    "python-json-logger>=4.0.0,<5.0.0",
+    "python-telegram-bot[job-queue]>=20.0,<22.0",
+    "tzdata>=2024.1",
+]
+
+[project.scripts]
+ibkr-mcp = "mcp_server.main:main"
+
+[dependency-groups]
+dev = [
+    "black>=23.12",
+    "flake8>=6.1",
+    "httpx>=0.25,<1.0",
+    "isort>=5.13",
+    "mypy>=1.7",
+    "pytest>=7.4",
+    "pytest-asyncio>=0.21",
+    "pytest-cov>=4.1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["ibkr_core", "mcp_server", "trade_core"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311", "py312"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.mypy]
+python_version = "3.11"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = false
+no_implicit_optional = true
+warn_return_any = true
+warn_unused_configs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "integration: marks tests that require running IB Gateway (deselect with '-m \"not integration\"')",
+    "slow: marks tests that take a long time",
+]
+addopts = [
+    "-v",
+    "--strict-markers",
+    "--tb=short",
+]
+
+[tool.coverage.run]
+source = ["ibkr_core", "mcp_server", "trade_core"]
+omit = ["*/tests/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+]

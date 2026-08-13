@@ -1,0 +1,344 @@
+{
+  "valid_orders": [
+    {
+      "description": "AAPL stock buy market order",
+      "order_spec": {
+        "instrument": {
+          "symbol": "AAPL",
+          "securityType": "STK",
+          "exchange": "SMART",
+          "currency": "USD"
+        },
+        "side": "BUY",
+        "quantity": 1,
+        "orderType": "MKT",
+        "tif": "DAY"
+      }
+    },
+    {
+      "description": "AAPL stock buy limit order",
+      "order_spec": {
+        "instrument": {
+          "symbol": "AAPL",
+          "securityType": "STK",
+          "exchange": "SMART",
+          "currency": "USD"
+        },
+        "side": "BUY",
+        "quantity": 1,
+        "orderType": "LMT",
+        "limitPrice": 150.00,
+        "tif": "DAY"
+      }
+    },
+    {
+      "description": "AAPL stock sell limit order",
+      "order_spec": {
+        "instrument": {
+          "symbol": "AAPL",
+          "securityType": "STK",
+          "exchange": "SMART",
+          "currency": "USD"
+        },
+        "side": "SELL",
+        "quantity": 10,
+        "orderType": "LMT",
+        "limitPrice": 200.00,
+        "tif": "GTC"
+      }
+    },
+    {
+      "description": "MES futures buy limit order",
+      "order_spec": {
+        "instrument": {
+          "symbol": "MES",
+          "securityType": "FUT",
+          "exchange": "CME",
+          "currency": "USD"
+        },
+        "side": "BUY",
+        "quantity": 1,
+        "orderType": "LMT",
+        "limitPrice": 5000.00,
+        "tif": "DAY"
+      }
+    },
+    {
+      "description": "MES futures sell limit order",
+      "order_spec": {
+        "instrument": {
+          "symbol": "MES",
+          "securityType": "FUT",
+          "exchange": "CME",
+          "currency": "USD"
+        },
+        "side": "SELL",
+        "quantity": 1,
+        "orderType": "LMT",
+        "limitPrice": 6000.00,
+        "tif": "DAY"
+      }
+    },
+    {
+      "description": "SPY ETF buy market order with GTC",
+      "order_spec": {
+        "instrument": {
+          "symbol": "SPY",
+          "securityType": "ETF",
+          "exchange": "SMART",
+          "currency": "USD"
+        },
+        "side": "BUY",
+        "quantity": 5,
+        "orderType": "MKT",
+        "tif": "GTC"
+      }
+    },
+    {
+      "description": "AAPL stop order",
+      "order_spec": {
+        "instrument": {
+          "symbol": "AAPL",
+          "securityType": "STK",
+          "exchange": "SMART",
+          "currency": "USD"
+        },
+        "side": "SELL",
+        "quantity": 10,
+        "orderType": "STP",
+        "stopPrice": 140.00,
+        "tif": "DAY"
+      }
+    },
+    {
+      "description": "AAPL stop-limit order",
+      "order_spec": {
+        "instrument": {
+          "symbol": "AAPL",
+          "securityType": "STK",
+          "exchange": "SMART",
+          "currency": "USD"
+        },
+        "side": "SELL",
+        "quantity": 10,
+        "orderType": "STP_LMT",
+        "stopPrice": 140.00,
+        "limitPrice": 139.00,
+        "tif": "DAY"
+      }
+    }
+  ],
+  "invalid_orders": [
+    {
+      "description": "Negative quantity",
+      "order_spec": {
+        "instrument": {
+          "symbol": "AAPL",
+          "securityType": "STK",
+          "exchange": "SMART",
+          "currency": "USD"
+        },
+        "side": "BUY",
+        "quantity": -1,
+        "orderType": "MKT",
+        "tif": "DAY"
+      },
+      "expected_error": "quantity"
+    },
+    {
+      "description": "Zero quantity",
+      "order_spec": {
+        "instrument": {
+          "symbol": "AAPL",
+          "securityType": "STK",
+          "exchange": "SMART",
+          "currency": "USD"
+        },
+        "side": "BUY",
+        "quantity": 0,
+        "orderType": "MKT",
+        "tif": "DAY"
+      },
+      "expected_error": "quantity"
+    },
+    {
+      "description": "Invalid order type",
+      "order_spec": {
+        "instrument": {
+          "symbol": "AAPL",
+          "securityType": "STK",
+          "exchange": "SMART",
+          "currency": "USD"
+        },
+        "side": "BUY",
+        "quantity": 1,
+        "orderType": "INVALID",
+        "tif": "DAY"
+      },
+      "expected_error": "orderType"
+    },
+    {
+      "description": "Invalid side",
+      "order_spec": {
+        "instrument": {
+          "symbol": "AAPL",
+          "securityType": "STK",
+          "exchange": "SMART",
+          "currency": "USD"
+        },
+        "side": "HOLD",
+        "quantity": 1,
+        "orderType": "MKT",
+        "tif": "DAY"
+      },
+      "expected_error": "side"
+    },
+    {
+      "description": "Invalid TIF",
+      "order_spec": {
+        "instrument": {
+          "symbol": "AAPL",
+          "securityType": "STK",
+          "exchange": "SMART",
+          "currency": "USD"
+        },
+        "side": "BUY",
+        "quantity": 1,
+        "orderType": "MKT",
+        "tif": "INVALID"
+      },
+      "expected_error": "tif"
+    },
+    {
+      "description": "Market order with limit price",
+      "order_spec": {
+        "instrument": {
+          "symbol": "AAPL",
+          "securityType": "STK",
+          "exchange": "SMART",
+          "currency": "USD"
+        },
+        "side": "BUY",
+        "quantity": 1,
+        "orderType": "MKT",
+        "limitPrice": 150.00,
+        "tif": "DAY"
+      },
+      "expected_error": "limit price"
+    },
+    {
+      "description": "Limit order without limit price",
+      "order_spec": {
+        "instrument": {
+          "symbol": "AAPL",
+          "securityType": "STK",
+          "exchange": "SMART",
+          "currency": "USD"
+        },
+        "side": "BUY",
+        "quantity": 1,
+        "orderType": "LMT",
+        "tif": "DAY"
+      },
+      "expected_error": "limit price"
+    },
+    {
+      "description": "Limit order with zero limit price",
+      "order_spec": {
+        "instrument": {
+          "symbol": "AAPL",
+          "securityType": "STK",
+          "exchange": "SMART",
+          "currency": "USD"
+        },
+        "side": "BUY",
+        "quantity": 1,
+        "orderType": "LMT",
+        "limitPrice": 0,
+        "tif": "DAY"
+      },
+      "expected_error": "limit price"
+    },
+    {
+      "description": "Stop order without stop price",
+      "order_spec": {
+        "instrument": {
+          "symbol": "AAPL",
+          "securityType": "STK",
+          "exchange": "SMART",
+          "currency": "USD"
+        },
+        "side": "SELL",
+        "quantity": 1,
+        "orderType": "STP",
+        "tif": "DAY"
+      },
+      "expected_error": "stop price"
+    },
+    {
+      "description": "Stop-limit order without prices",
+      "order_spec": {
+        "instrument": {
+          "symbol": "AAPL",
+          "securityType": "STK",
+          "exchange": "SMART",
+          "currency": "USD"
+        },
+        "side": "SELL",
+        "quantity": 1,
+        "orderType": "STP_LMT",
+        "tif": "DAY"
+      },
+      "expected_error": "stop price"
+    }
+  ],
+  "order_results": {
+    "accepted": {
+      "orderId": "123456789",
+      "clientOrderId": null,
+      "status": "ACCEPTED",
+      "orderStatus": {
+        "orderId": "123456789",
+        "clientOrderId": null,
+        "status": "SUBMITTED",
+        "filledQuantity": 0,
+        "remainingQuantity": 1,
+        "avgFillPrice": 0,
+        "lastUpdate": "2024-01-01T12:00:00Z",
+        "warnings": []
+      },
+      "errors": []
+    },
+    "simulated": {
+      "orderId": null,
+      "clientOrderId": null,
+      "status": "SIMULATED",
+      "orderStatus": null,
+      "errors": ["Order not placed: ORDERS_ENABLED=false (simulation mode)"]
+    },
+    "rejected": {
+      "orderId": null,
+      "clientOrderId": null,
+      "status": "REJECTED",
+      "orderStatus": null,
+      "errors": ["Quantity must be positive"]
+    }
+  },
+  "cancel_results": {
+    "cancelled": {
+      "orderId": "123456789",
+      "status": "CANCELLED",
+      "message": "Order cancelled successfully"
+    },
+    "not_found": {
+      "orderId": "999999999",
+      "status": "NOT_FOUND",
+      "message": "Order 999999999 not found"
+    },
+    "already_filled": {
+      "orderId": "123456789",
+      "status": "ALREADY_FILLED",
+      "message": "Order has already been filled"
+    }
+  }
+}
