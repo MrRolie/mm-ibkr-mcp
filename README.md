@@ -12,7 +12,7 @@
 
 It assumes the user already has IB Gateway or TWS running locally. This repo does not manage the broker process. Its job is to connect, inspect account state, preview orders, place trades, persist execution state, and gate submissions through Telegram when required.
 
-The older `mm-ibkr-gateway` repo remains public for now and will later narrow into gateway deployment and maintenance tooling. This repo is the canonical monitoring and trading MCP surface.
+This repo is the canonical monitoring and trading MCP surface.
 
 ## Scope
 
